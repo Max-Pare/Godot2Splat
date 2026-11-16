@@ -14,7 +14,6 @@ import numpy as np
 
 T = 0.2  # wall thickness
 ROOM_LO, ROOM_HI = np.array([-3.0, 0.0, -2.5]), np.array([3.0, 2.7, 2.5])
-WINDOW_LO, WINDOW_HI = np.array([3.0, 1.0, -0.75]), np.array([3.0 + T, 2.0, 0.75])
 
 # name, centre, size, material, has a collision body
 SHELL = [
@@ -56,32 +55,29 @@ def _box_sdf(p: np.ndarray, lo, hi) -> np.ndarray:
     return np.linalg.norm(np.maximum(q, 0), axis=1) + np.minimum(q.max(axis=1), 0)
 
 
+def _solids():
+    for _, centre, size, _, _ in SHELL + PROP_BOXES:
+        c, s = np.array(centre, dtype=float), np.array(size, dtype=float)
+        yield c - s / 2, c + s / 2
+
+
 def surface_distance(p: np.ndarray) -> np.ndarray:
-    """Distance of points [N,3] to the nearest surface that can be seen from inside the room."""
-    # Open air: the room, the window opening, and everything beyond the east wall.
-    # The opening is taken longer than the wall is thick, so that the three regions
-    # overlap: where two of them only touch, their shared face would count as a surface.
-    reach = np.array([0.5, 0.0, 0.0])
-    air = np.minimum.reduce([_box_sdf(p, ROOM_LO, ROOM_HI),
-                             _box_sdf(p, WINDOW_LO - reach, WINDOW_HI + reach),
-                             (3.0 + T) - p[:, 0]])
-    best = np.abs(air)
-    for _, centre, size, _, _ in PROP_BOXES:
-        c, s = np.array(centre), np.array(size)
-        best = np.minimum(best, np.abs(_box_sdf(p, c - s / 2, c + s / 2)))
+    """Distance of points [N,3] to the nearest surface of the room or its props.
+    Meant for points in open air or on a surface, not inside a wall."""
     _, centre, radius, _ = SPHERE
-    return np.minimum(best, np.abs(np.linalg.norm(p - np.array(centre), axis=1) - radius))
+    best = np.abs(np.linalg.norm(p - np.array(centre), axis=1) - radius)
+    for lo, hi in _solids():
+        best = np.minimum(best, np.abs(_box_sdf(p, lo, hi)))
+    return best
 
 
-def in_open_air(p: np.ndarray, margin: float = 0.0) -> np.ndarray:
-    """True for points inside the room and at least `margin` away from every surface."""
-    inside = _box_sdf(p, ROOM_LO, ROOM_HI) < 0
-    for _, centre, size, _, _ in PROP_BOXES:
-        c, s = np.array(centre), np.array(size)
-        inside &= _box_sdf(p, c - s / 2, c + s / 2) > 0
+def in_open_air(p: np.ndarray) -> np.ndarray:
+    """True for points inside the room and outside every prop."""
     _, centre, radius, _ = SPHERE
-    inside &= np.linalg.norm(p - np.array(centre), axis=1) > radius
-    return inside & (surface_distance(p) >= margin)
+    inside = (_box_sdf(p, ROOM_LO, ROOM_HI) < 0) & (np.linalg.norm(p - np.array(centre), axis=1) > radius)
+    for lo, hi in _solids():
+        inside &= _box_sdf(p, lo, hi) > 0
+    return inside
 
 
 def _vec(v) -> str:

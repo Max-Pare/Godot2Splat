@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import importlib
+import os
+import sys
 from dataclasses import asdict
 from pathlib import Path
 from typing import Optional
@@ -21,6 +23,15 @@ STAGES = ["capture", "ingest", "train", "clean", "export"]
 def default_workspace(project: Path, scene_res: str) -> Path:
     """One cache folder per scene, inside the project but hidden from Godot."""
     return Path(project) / project_mod.WORK_DIR / Path(scene_res).stem
+
+
+@app.callback()
+def main(
+    merge_stderr: bool = typer.Option(False, hidden=True, help="Send error output to standard output. The editor button reads one stream."),
+) -> None:
+    if merge_stderr:
+        sys.stderr.flush()
+        os.dup2(sys.stdout.fileno(), sys.stderr.fileno())
 
 
 @app.command()

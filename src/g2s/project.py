@@ -91,7 +91,8 @@ def install(project: Path, force: bool = False) -> list[str]:
     work.mkdir(exist_ok=True)
     (work / ".gdignore").touch()
     # How the editor button starts this tool: the interpreter of this install.
-    command = {"argv": [sys.executable, "-m", "g2s"]}
+    # -u and --merge-stderr: the button shows one stream, line by line as it is printed.
+    command = {"argv": [sys.executable, "-u", "-m", "g2s", "--merge-stderr"]}
     (work / "command.json").write_text(json.dumps(command, indent=2))
     return done
 

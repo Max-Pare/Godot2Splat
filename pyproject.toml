@@ -64,6 +64,8 @@ url = "https://download.pytorch.org/whl/rocm7.2"
 explicit = true
 
 [tool.pytest.ini_options]
-pythonpath = ["src"]
+pythonpath = ["src", "tests"]
 testpaths = ["tests"]
-markers = ["godot: runs the Godot editor binary with a window (slow)"]
+# The pipeline test needs Godot with a window and a GPU: run it with `pytest -m godot`.
+addopts = "-m 'not godot'"
+markers = ["godot: runs Godot with a window and trains a splat (minutes)"]
