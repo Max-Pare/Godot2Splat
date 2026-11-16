@@ -57,7 +57,7 @@ def score(ws: Workspace, cfg: Config, stage: str) -> dict:
     def to_bgr(img):
         return cv2.cvtColor((img.cpu().numpy() * 255).astype(np.uint8), cv2.COLOR_RGB2BGR)
 
-    full, base, depth_err = [], [], []
+    full, base, depth_err, names, sheets = [], [], [], [], {}
     with torch.no_grad():
         for n, i in enumerate(which):
             gt = images[n].to(dev).float() / 255
@@ -76,17 +76,23 @@ def score(ws: Workspace, cfg: Config, stage: str) -> dict:
             full.append(psnr(a_rgb, gt, solid))
             base.append(psnr(b_rgb, gt, solid))
             depth_err.append(float(train.depth_loss(a[..., 3], depth)))
-            if n in picked:
-                cv2.imwrite(str(out / f"{Path(str(scene['names'][i])).stem}.jpg"),
-                            np.hstack([to_bgr(gt), to_bgr(a_rgb), to_bgr(b_rgb)]),
-                            [cv2.IMWRITE_JPEG_QUALITY, 90])
+            names.append(Path(str(scene["names"][i])).stem)
+            # Keep an even sample of the views, and always the worst one so far.
+            if n in picked or full[-1] <= min(full):
+                sheets[names[-1]] = (full[-1], n in picked,
+                                     np.hstack([to_bgr(gt), to_bgr(a_rgb), to_bgr(b_rgb)]))
+    worst = names[int(np.argmin(full))]
+    for name, (_, sampled, sheet) in sheets.items():
+        if sampled or name == worst:
+            cv2.imwrite(str(out / f"{name}.jpg"), sheet, [cv2.IMWRITE_JPEG_QUALITY, 90])
     result = {
         "stage": stage, "gaussians": int(len(params["means"])), "views": len(full),
         "held_out": held_out,
-        "psnr": float(np.mean(full)), "psnr_worst": float(np.min(full)),
+        "psnr": float(np.mean(full)), "psnr_worst": float(np.min(full)), "worst_view": worst,
         "psnr_base": float(np.mean(base)),
         "depth_error_m": float(np.mean(depth_err)),
         "pictures": str(out),
+        "per_view": {name: round(v, 2) for name, v in zip(names, full)},
     }
     (out / "score.json").write_text(json.dumps(result, indent=2))
     return result
@@ -96,7 +102,7 @@ def report(ws: Workspace, cfg: Config, stage: str) -> dict:
     r = score(ws, cfg, stage)
     kind = "held-out views" if r["held_out"] else "training views (none were held out)"
     print(f"{stage}: {r['gaussians']} Gaussians scored on {r['views']} {kind}: "
-          f"PSNR {r['psnr']:.2f} dB (worst view {r['psnr_worst']:.2f}), "
+          f"PSNR {r['psnr']:.2f} dB (worst view {r['worst_view']}: {r['psnr_worst']:.2f}), "
           f"base colour only {r['psnr_base']:.2f} dB, depth error {r['depth_error_m'] * 100:.1f} cm; "
           f"pictures in {r['pictures']}", flush=True)
     return r

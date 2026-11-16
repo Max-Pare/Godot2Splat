@@ -13,12 +13,16 @@ Verified on the test room in `tests/fixture_project` (6 x 5 m room, a window to 
 
 | Check | Result |
 |---|---|
-| Capture | 402 pictures from 67 camera positions in 7 s |
+| Capture | 402 pictures from 67 camera positions in 7 s; every camera at least 0.30 m from a surface |
 | Depth and camera conventions | 40 million depth pixels pushed back into the world: median 0.2 mm, worst 1.0 mm from the room's true surfaces |
-| Short training (2,500 steps, under a minute) | see `pytest -m godot` thresholds: over 32 dB PSNR on held-out views |
-| Godot shows the generated scene | 34 to 41 dB PSNR against the scan pictures on six held-out views |
+| Training, default size (20,000 steps, 8.5 min) | 38.49 dB PSNR on 48 held-out pictures after cleanup (median picture 39.0, worst 25.8), depth error 1.2 cm, 1,200,000 Gaussians cut to 854,999 by cleanup for 0.09 dB |
+| Training, short (3,000 steps, 0.8 min) | 37.12 dB on the same pictures |
+| Godot shows the generated scene (3,000-step splat) | 34 to 41 dB PSNR against the scan pictures on six held-out views |
+| Editor button | ran through its test hook: starts g2s, shows its output, imports the splat, builds and opens the scene |
 
-Not verified: scenes other than the test room, the Mobile renderer, Windows, NVIDIA. The editor button was exercised through its test hook, not by clicking.
+The worst held-out picture looks up at the underside of the table from close by. Few cameras see that surface, and it comes out soft.
+
+Not verified: scenes other than the test room, the Mobile renderer, Windows, NVIDIA, and clicking the editor button by hand.
 
 ## Setup
 
@@ -116,6 +120,7 @@ If you instance the splat scene into a scene with its own `WorldEnvironment`, de
 
 ## Limits
 
+- Surfaces that few cameras see, such as the underside of low furniture, come out soft. Lower `Camera Spacing` to get more positions near them.
 - A static snapshot: moving objects, animated lights and particles are frozen as they were after `Settle Frames`.
 - Transparent materials write no depth. Glass is learned as a tint on what lies behind it. Mirrors and reflections are approximated by view-dependent colour.
 - SDFGI lighting moves with the camera and settles over many frames; expect shimmer, or raise `Warmup Frames` to 30 or more. Baked lightmaps and VoxelGI capture cleanly. The scan prints a note when SDFGI or volumetric fog is on.
@@ -123,7 +128,7 @@ If you instance the splat scene into a scene with its own `WorldEnvironment`, de
 - Collision: only `StaticBody3D` nodes with `CollisionShape3D` children are copied, read from the scene file. Bodies created by scripts, CSG and GridMap collision are not.
 - Projects that use physical light units or a custom exposure may alter the depth pass; `ingest` then stops with a message instead of using wrong depth.
 - The gdgs importer claims every `.ply` file in the project, and takes about 1.5 minutes per million Gaussians on first import. The editor does not respond during that time.
-- One floor of cameras is not assumed: the box is filled in 3D. Large boxes with small spacing reach `Max Positions` quickly; the positions are then thinned evenly, which lowers detail everywhere.
+- The box is filled with cameras in 3D, so a large box with a small spacing reaches `Max Positions` quickly. The positions are then thinned evenly, which lowers detail everywhere.
 
 ## Tests
 
