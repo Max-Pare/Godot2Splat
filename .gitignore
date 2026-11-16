@@ -1,0 +1,19 @@
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+*.egg-info/
+.godot/
+*.import
+*.uid
+
+# Per-scene stage caches (captures, checkpoints): large
+.g2s/
+workspace*/
+
+# Local toolchain: compiled gsplat source and torch's compiled-kernel cache
+tools/
+
+# Addons and results that tests install into the fixture project
+tests/fixture_project/addons/
+tests/fixture_project/splats/

@@ -1,0 +1,6 @@
+.godot/
+.g2s/
+addons/
+splats/
+*.import
+*.uid
