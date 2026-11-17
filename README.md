@@ -170,6 +170,7 @@ How the Unreal scan differs from the Godot one:
 - Exposure is the same for every picture. It is measured once at the start point, the way Unreal's auto exposure would (plus `Exposure Compensation`, default 1 like Unreal's), unless a post process volume there sets Manual exposure. Tick `Exposure EV100` on the volume to set it yourself.
 - Switched off unless `Keep Screen Space Effects`: screen-space reflections, SSAO, bloom, lens flares, depth of field, motion blur, vignette, grain, chromatic aberration.
 - World Partition levels: the region around the volume or `--origin` actor is loaded for the scan (`Fill Reach` plus 100 m around it).
+- During the scan the level viewports stop drawing every frame (a temporary Realtime override, removed afterwards; your own setting is kept): the pictures come from the scan's own cameras, so the GPU goes to them.
 - The sky picture shows Sky Atmosphere, fog, meshes whose material is marked Is Sky, and meshes larger than `Far Clip`.
 - Collision is not carried over: the generated Godot scene has no `Collision` node.
 

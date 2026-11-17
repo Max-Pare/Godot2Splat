@@ -16,6 +16,7 @@
 #include "ImageCore.h"
 #include "ImageUtils.h"
 #include "Interfaces/Interface_PostProcessVolume.h"
+#include "LevelEditorViewport.h"
 #include "Materials/Material.h"
 #include "Materials/MaterialInterface.h"
 #include "Misc/FileHelper.h"
@@ -53,6 +54,11 @@ namespace
 			Out.Add(MakeShared<FJsonValueNumber>(V));
 		}
 		return MakeShared<FJsonValueArray>(Out);
+	}
+
+	FText ViewportOverrideName()
+	{
+		return NSLOCTEXT("G2SCapture", "ViewportOverride", "Scan to Splat");
 	}
 
 	float Luminance(const FLinearColor& C)
@@ -267,6 +273,16 @@ void FG2SCaptureJob::Start(FOnFinished InOnFinished)
 	UEditorPerformanceSettings* Perf = GetMutableDefault<UEditorPerformanceSettings>();
 	bSavedThrottle = Perf->bThrottleCPUWhenNotForeground;
 	Perf->bThrottleCPUWhenNotForeground = false;
+	// The pictures come from the scan's own scene captures, not the viewports: stop
+	// the viewports drawing every frame so the GPU goes to the scan. A temporary
+	// override, removed at the end; the user's own Realtime setting is not changed.
+	if (GEditor != nullptr)
+	{
+		for (FLevelEditorViewportClient* Client : GEditor->GetLevelViewportClients())
+		{
+			Client->AddRealtimeOverride(false, ViewportOverrideName());
+		}
+	}
 
 	FAssetCompilingManager::Get().FinishAllCompilation();
 	if (GShaderCompilingManager != nullptr)
@@ -342,6 +358,16 @@ void FG2SCaptureJob::Finish(int32 Code)
 	}
 	SavedCVars.Empty();
 	GetMutableDefault<UEditorPerformanceSettings>()->bThrottleCPUWhenNotForeground = bSavedThrottle;
+	if (GEditor != nullptr)
+	{
+		for (FLevelEditorViewportClient* Client : GEditor->GetLevelViewportClients())
+		{
+			if (Client->HasRealtimeOverride(ViewportOverrideName()))
+			{
+				Client->RemoveRealtimeOverride(ViewportOverrideName());
+			}
+		}
+	}
 	Phase = EPhase::Done;
 	OnFinished.ExecuteIfBound(Code);
 }
