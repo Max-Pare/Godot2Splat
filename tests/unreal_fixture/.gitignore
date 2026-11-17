@@ -1,0 +1,8 @@
+# Made by the tests: the room map, the compiled plugin, Unreal's caches
+Content/
+Plugins/
+Saved/
+Intermediate/
+DerivedDataCache/
+Binaries/
+.g2s/

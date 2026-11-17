@@ -23,23 +23,71 @@ static func face_bases() -> Array[Basis]:
 	]
 
 
-## Candidate camera positions: a grid with `spacing` inside the box `size` centred
-## on `xf`, each point moved a little at random so that rows of cameras do not
-## line up with the scene.
-static func candidates(xf: Transform3D, size: Vector3, spacing: float,
-		rng: RandomNumberGenerator) -> PackedVector3Array:
-	var counts := Vector3i(maxi(1, roundi(size.x / spacing)), maxi(1, roundi(size.y / spacing)),
-			maxi(1, roundi(size.z / spacing)))
-	var step := size / Vector3(counts)
-	var out := PackedVector3Array()
-	for ix in counts.x:
-		for iy in counts.y:
-			for iz in counts.z:
-				var jitter := Vector3(rng.randf_range(-0.3, 0.3), rng.randf_range(-0.3, 0.3),
-						rng.randf_range(-0.3, 0.3))
-				var local := -size * 0.5 + (Vector3(ix, iy, iz) + Vector3(0.5, 0.5, 0.5) + jitter) * step
-				out.append(xf * local)
-	return out
+## Candidate camera positions: one per cell of a grid, each moved a little at
+## random (the same way every time) so that rows of cameras do not line up with
+## the scene. Cells are found on demand, so an unbounded grid costs nothing until
+## the walk reaches it. Same as FGrid in unreal/.../ViewPlanner.h.
+class Grid:
+	var xf: Transform3D
+	var offset: Vector3
+	var step: Vector3
+	var bounded := false
+	var count := Vector3i.ZERO
+
+	## The box `size` centred on `box_xf`, cells `spacing` apart (rounded to fit).
+	static func box(box_xf: Transform3D, size: Vector3, spacing: float) -> Grid:
+		var g := Grid.new()
+		g.xf = box_xf.orthonormalized()
+		g.bounded = true
+		g.count = Vector3i(maxi(1, roundi(size.x / spacing)), maxi(1, roundi(size.y / spacing)),
+				maxi(1, roundi(size.z / spacing)))
+		g.step = size / Vector3(g.count)
+		g.offset = -size * 0.5
+		return g
+
+	## No end; cell 0 is centred on `origin_xf`'s origin (the start point).
+	static func fill(origin_xf: Transform3D, spacing: float) -> Grid:
+		var g := Grid.new()
+		g.xf = origin_xf.orthonormalized()
+		g.step = Vector3.ONE * spacing
+		g.offset = -g.step * 0.5
+		return g
+
+	func contains(c: Vector3i) -> bool:
+		return not bounded or (c.x >= 0 and c.y >= 0 and c.z >= 0
+				and c.x < count.x and c.y < count.y and c.z < count.z)
+
+	func position(c: Vector3i) -> Vector3:
+		var rng := RandomNumberGenerator.new()
+		rng.seed = hash(c) + 0x9e3779b9
+		var jitter := Vector3(rng.randf_range(-0.3, 0.3), rng.randf_range(-0.3, 0.3), rng.randf_range(-0.3, 0.3))
+		return xf * (offset + (Vector3(c) + Vector3(0.5, 0.5, 0.5) + jitter) * step)
+
+	func cell_of(world: Vector3) -> Vector3i:
+		var local := (xf.affine_inverse() * world - offset) / step
+		return Vector3i(floori(local.x), floori(local.y), floori(local.z))
+
+	func num_cells() -> int:
+		return count.x * count.y * count.z if bounded else 0
+
+
+## Share of a probe's pixels that see nothing within the far plane: sky.
+static func sky_share(probe: Array[PackedFloat32Array]) -> float:
+	var sky := 0
+	var all := 0
+	for face in probe:
+		for d in face:
+			if d <= 0.0:
+				sky += 1
+		all += face.size()
+	return float(sky) / maxi(1, all)
+
+
+## Camera positions affordable for training: all pictures stay in memory, so the
+## budget is in pixels (1.5 gigapixels, about 6 GB of RAM with depth): 390
+## positions at 800 px, 610 at 640 px.
+static func auto_max_positions(image_size: int) -> int:
+	return maxi(30, int(1.5e9 / (6.0 * image_size * image_size)))
 
 
 ## Distance to the nearest surface for every pixel of a probe face.

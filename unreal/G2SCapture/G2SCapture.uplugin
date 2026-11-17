@@ -1,0 +1,24 @@
+{
+	"FileVersion": 3,
+	"Version": 1,
+	"VersionName": "0.1.0",
+	"FriendlyName": "godot2splat capture",
+	"Description": "Scans an Unreal level into pictures and depth maps for g2s, which trains a Gaussian splat and puts it into a Godot project.",
+	"Category": "Rendering",
+	"CreatedBy": "godot2splat",
+	"CanContainContent": false,
+	"EnabledByDefault": true,
+	"Installed": false,
+	"Modules": [
+		{
+			"Name": "G2SCapture",
+			"Type": "Runtime",
+			"LoadingPhase": "Default"
+		},
+		{
+			"Name": "G2SCaptureEditor",
+			"Type": "Editor",
+			"LoadingPhase": "PostEngineInit"
+		}
+	]
+}

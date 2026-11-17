@@ -13,7 +13,10 @@ const MAX_RENDER_STATES := 4
 const FLOATS_PER_SPLAT := 60
 const FLOATS_PER_CULLED_SPLAT := 16
 const BYTES_PER_FLOAT := 4
-const MAX_SORT_ELEMENTS_PER_SPLAT := 10
+# Tile entries reserved per splat in the sort buffers. Must match gsplat_projection.glsl.
+# Views close to large splats can need more; the excess is dropped (g2s: was 10, and the
+# excess overflowed the buffers, which showed as square glitches).
+const MAX_SORT_ELEMENTS_PER_SPLAT := 16
 # Relighting. Must match gsplat_projection.glsl and gaussian_light_rig.gd.
 const LIGHTING_BYTES_PER_SPLAT := 4
 const RELIGHT_FLOATS_PER_INSTANCE := 8

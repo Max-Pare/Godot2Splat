@@ -21,6 +21,9 @@
 #define SH_C3_6 0.5900435899266435
 
 #define TILE_SIZE                (16)
+// Sort buffer entries per splat; must match MAX_SORT_ELEMENTS_PER_SPLAT in
+// gaussian_renderer.gd and gaussian_gpu_state_cache.gd.
+#define MAX_SORT_ELEMENTS_PER_SPLAT (16u)
 #define NUM_BLOCKS_PER_WORKGROUP (32)
 #define SORT_WORKGROUP_SIZE      (512)
 #define SORT_PARTITION_DIVISION  (8)
@@ -370,7 +373,14 @@ void main() {
 
 	if (num_tiles_touched == 0 /*|| num_tiles_touched > grid_size.x*grid_size.y/3*/) return;
 
+	// The sort buffers hold point_count * MAX_SORT_ELEMENTS_PER_SPLAT entries. Tile
+	// entries past that are dropped: writing them overran the buffers, and the sort
+	// then read garbage, which showed as flat squares (g2s fix). The passes after
+	// this one clamp the count to the same capacity.
+	const uint capacity = uint(point_count) * MAX_SORT_ELEMENTS_PER_SPLAT;
 	const uint buffer_size = atomicAdd(sort_buffer_size, num_tiles_touched);
+	if (buffer_size >= capacity) return;
+	const uint sort_buffer_end = min(buffer_size + num_tiles_touched, capacity);
 	uint sort_buffer_offset = buffer_size;
 	vec3 view_dir = normalize(world_pos.xyz - camera_pos);
 
@@ -409,6 +419,7 @@ void main() {
 	uint depth = uint(depth01 * 65535.0) & 0xFFFF;
 	for (uint y = rect_bounds.y; y < rect_bounds.w; ++y)
 	for (uint x = rect_bounds.x; x < rect_bounds.z; ++x) {
+		if (sort_buffer_offset >= sort_buffer_end) break;
 		uint tile_id = y*grid_size.x + x;
 		uint key = (tile_id << 16) | depth;
 		sort_keys[sort_buffer_offset] = key;

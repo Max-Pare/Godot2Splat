@@ -12,7 +12,29 @@ extends Node3D
 ## Scan with the "Scan to Splat" button while this node is selected, or with
 ## `g2s build <project folder> <scene>`.
 
-## Box in which cameras are placed, in metres, centred on this node.
+enum Placement {
+	## Cameras fill the open space reachable from the start points, however far it
+	## goes (up to fill_reach). The box is not used.
+	FILL,
+	## Cameras are placed in the reachable open space inside the box only.
+	BOX,
+}
+
+## Where cameras go. Fill: the open space is filled cell by cell (camera_spacing
+## apart) from the start points through everything they can see, so a whole
+## interior is scanned without sizing a box. The fill does not go out through
+## windows and doors into the open: a cell that sees mostly sky stops it.
+@export var placement := Placement.FILL:
+	set(value):
+		placement = value
+		update_gizmos()
+## Fill: cameras stay within this distance of this node.
+@export_range(5.0, 1000.0, 1.0, "suffix:m") var fill_reach := 150.0
+## Fill: a cell whose surroundings are more than this share sky counts as outdoors
+## and stops the fill. 1 never stops.
+@export_range(0.05, 1.0, 0.05) var outdoor_sky_share := 0.3
+
+## Box in which cameras are placed with placement Box, in metres, centred on this node.
 @export var size := Vector3(10.0, 4.0, 10.0):
 	set(value):
 		size = value.max(Vector3(0.1, 0.1, 0.1))
@@ -23,7 +45,9 @@ extends Node3D
 ## Cameras keep at least this distance from every surface.
 @export_range(0.05, 2.0, 0.05, "suffix:m") var min_clearance := 0.3
 ## Upper limit on camera positions; more than this are thinned out evenly.
-@export_range(5, 1000, 1) var max_positions := 120
+## 0: as many as training can hold in memory (1.5 gigapixels of pictures: 390
+## positions at 800 px, 610 at 640 px).
+@export_range(0, 5000, 1) var max_positions := 0
 ## Width and height of each picture. Training time follows the pixel count.
 @export_range(128, 2048, 16, "suffix:px") var image_size := 800
 ## Every n-th camera position is kept out of training and used to score the

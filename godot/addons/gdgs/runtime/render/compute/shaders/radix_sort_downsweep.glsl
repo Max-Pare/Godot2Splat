@@ -35,7 +35,7 @@ layout (push_constant) uniform PushConstant {
     int pass;
     uint in_offset;
     uint out_offset;
-    float _pad;
+    uint capacity; // sort buffer entries; the count is clamped to it (g2s fix)
 };
 
 const uint SHMEM_SIZE = PARTITION_SIZE;
@@ -49,7 +49,7 @@ void main() {
 
     uint partition_index = gl_WorkGroupID.x;
     uint partition_start = partition_index * PARTITION_SIZE;
-    uint element_count = element_count;
+    uint element_count = min(element_count, capacity);
 
     if (partition_start >= element_count) return;
 

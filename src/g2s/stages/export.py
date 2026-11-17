@@ -1,4 +1,7 @@
-"""Stage 5: put the splat back into the Godot project.
+"""Stage 5: put the splat into the Godot project.
+
+That is the scanned project for a Godot scan; for an Unreal scan, the Godot project
+given with --godot-project or set on the capture volume.
 
 Written into the capture volume's output folder (default res://splats/<scene>/):
   <scene>.ply            the Gaussians, centred on their mean position
@@ -36,10 +39,21 @@ def mean_colour(ply: Path) -> list[float]:
     return [float(v) for v in (rgb * weight).sum(axis=0) / weight.sum()]
 
 
+def target_project(cfg: Config, cap: dict) -> Path:
+    """The Godot project that receives the splat."""
+    given = cfg.export.godot_project or (cap.get("godot_project", "") if cfg.capture.engine == "unreal" else "")
+    if cfg.capture.engine == "unreal" and not given:
+        raise SystemExit("export: no Godot project to put the splat in. Set Godot Project on the Splat Capture "
+                         "Volume, or pass --godot-project.")
+    project = Path(given or cfg.capture.project)
+    project_mod.check_project(project)
+    return project
+
+
 def run(ws: Workspace, cfg: Config) -> None:
     c = cfg.capture
-    project = Path(c.project)
     cap = ingest.load_capture(ws)
+    project = target_project(cfg, cap)
     name = Path(c.scene).stem
     out_res = str(cap.get("output_dir") or f"res://splats/{name}/").rstrip("/") + "/"
     out = project_mod.res_to_path(project, out_res)
@@ -65,7 +79,9 @@ def run(ws: Workspace, cfg: Config) -> None:
 
     manifest = {
         "version": 1,
-        "source_scene": c.scene,
+        # Collision is copied from a Godot source scene only.
+        "source_scene": c.scene if c.engine == "godot" else "",
+        "source": {"engine": c.engine, "project": c.project, "scene": c.scene},
         "splat": f"{out_res}{name}.ply",
         "center": [float(v) for v in center],
         "sky": sky_res,
@@ -80,6 +96,8 @@ def run(ws: Workspace, cfg: Config) -> None:
     if not cfg.export.godot_import:
         print(f"export: left for the editor: import and build {manifest['scene']}")
         return
+    if c.engine != "godot":
+        project_mod.ensure_ready(project, c.godot)
     print("export: Godot is importing the splat (about 1.5 minutes per million Gaussians)", flush=True)
     project_mod.import_assets(project, c.godot)
     code, text = project_mod.run_godot(

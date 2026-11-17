@@ -4,7 +4,10 @@ class_name GaussianRenderer
 
 const RenderingDeviceContext := preload("res://addons/gdgs/runtime/render/compute/gaussian_rendering_device_context.gd")
 const RADIX := 256
-const MAX_SORT_ELEMENTS_PER_SPLAT := 10
+# Tile entries reserved per splat in the sort buffers. Must match gsplat_projection.glsl.
+# Views close to large splats can need more; the excess is dropped (g2s: was 10, and the
+# excess overflowed the buffers, which showed as square glitches).
+const MAX_SORT_ELEMENTS_PER_SPLAT := 16
 
 func render_for_compositor(
 	state_cache: GaussianGpuStateCache,
@@ -84,13 +87,16 @@ func _rasterize_state(state, point_count: int, light_count: int) -> void:
 	state.pipelines["gsplat_projection"].call(state.context, compute_list, state.camera_push_constants)
 	state.context.compute_list_end()
 
+	# The projection may count more tile entries than the buffers hold; every pass
+	# after it clamps the count to this (g2s fix for square glitches).
+	var capacity := point_count * MAX_SORT_ELEMENTS_PER_SPLAT
 	compute_list = state.context.compute_list_begin()
 	for radix_shift_pass in range(4):
 		var sort_push_constant := RenderingDeviceContext.create_push_constant([
 			radix_shift_pass,
-			point_count * MAX_SORT_ELEMENTS_PER_SPLAT * (radix_shift_pass % 2),
-			point_count * MAX_SORT_ELEMENTS_PER_SPLAT * (1 - (radix_shift_pass % 2)),
-			0
+			capacity * (radix_shift_pass % 2),
+			capacity * (1 - (radix_shift_pass % 2)),
+			capacity
 		])
 		state.pipelines["radix_sort_upsweep"].call(state.context, compute_list, sort_push_constant, [], state.descriptors["grid_dimensions"].rid, 0)
 		state.pipelines["radix_sort_spine"].call(state.context, compute_list, sort_push_constant)
@@ -98,7 +104,8 @@ func _rasterize_state(state, point_count: int, light_count: int) -> void:
 	state.context.compute_list_end()
 
 	compute_list = state.context.compute_list_begin()
-	state.pipelines["gsplat_boundaries"].call(state.context, compute_list, PackedByteArray(), [], state.descriptors["grid_dimensions"].rid, 3 * 4)
+	state.pipelines["gsplat_boundaries"].call(state.context, compute_list,
+		RenderingDeviceContext.create_push_constant([capacity, 0, 0, 0]), [], state.descriptors["grid_dimensions"].rid, 3 * 4)
 	state.context.compute_list_end()
 
 	compute_list = state.context.compute_list_begin()

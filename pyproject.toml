@@ -1,7 +1,7 @@
 [project]
 name = "g2s"
 version = "0.1.0"
-description = "Scan a Godot 3D scene into a Gaussian splat and import it back into the project"
+description = "Scan a Godot scene or an Unreal map into a Gaussian splat and import it into a Godot project"
 requires-python = ">=3.11"
 dependencies = [
     "numpy>=1.26",
@@ -66,6 +66,10 @@ explicit = true
 [tool.pytest.ini_options]
 pythonpath = ["src", "tests"]
 testpaths = ["tests"]
-# The pipeline test needs Godot with a window and a GPU: run it with `pytest -m godot`.
-addopts = "-m 'not godot'"
-markers = ["godot: runs Godot with a window and trains a splat (minutes)"]
+# The pipeline tests need a GPU and Godot (and Unreal) with a window:
+# run them with `pytest -m godot` and `pytest -m unreal`.
+addopts = "-m 'not godot and not unreal'"
+markers = [
+    "godot: runs Godot with a window and trains a splat (minutes)",
+    "unreal: compiles the capture plugin, runs Unreal and Godot, trains a splat (minutes)",
+]

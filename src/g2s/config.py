@@ -1,7 +1,7 @@
 """All tunables, grouped per stage. A stage re-runs when its group changes.
 
 Capture settings (box size, camera spacing, image size) are not here: they live on
-the SplatCaptureVolume node in the Godot scene and reach Python through capture.json.
+the SplatCaptureVolume node (Godot) or actor (Unreal) and reach Python through capture.json.
 """
 from __future__ import annotations
 
@@ -10,10 +10,17 @@ from dataclasses import dataclass, field
 
 @dataclass
 class CaptureCfg:
-    project: str = ""          # Godot project folder
-    scene: str = ""            # res:// path of the scene to scan
-    godot: str = "godot"       # Godot editor binary (4.3+)
-    timeout: float = 3600.0    # seconds before a hanging Godot is stopped
+    engine: str = "godot"      # which engine scans: "godot" or "unreal"
+    project: str = ""          # Godot project folder, or Unreal project folder
+    scene: str = ""            # res:// path of the scene, or /Game/... path of the Unreal map
+    godot: str = "godot"       # Godot editor binary (4.3+); also builds the splat scene
+    unreal: str = ""           # UnrealEditor-Cmd binary; empty: from the project's engine version
+    timeout: float = 3600.0    # seconds before a hanging Godot or Unreal is stopped
+    # Unreal only. origin: scan from a temporary volume at the actor with this label.
+    # box: "auto" (explored) or "LxWxH" metres. settings: "Name=Value" for the volume.
+    origin: str = ""
+    box: str = ""
+    settings: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -68,6 +75,9 @@ class CleanCfg:
 @dataclass
 class ExportCfg:
     godot_import: bool = True   # run Godot to import the splat and build the scene
+    # Godot project that receives the splat. Empty: the scanned project (Godot), or
+    # the Godot Project set on the Unreal capture volume.
+    godot_project: str = ""
 
 
 @dataclass

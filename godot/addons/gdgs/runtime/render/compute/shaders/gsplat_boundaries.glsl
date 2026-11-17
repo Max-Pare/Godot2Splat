@@ -18,9 +18,16 @@ layout (std430, set = 0, binding = 2) restrict writeonly buffer BoundsBuffer {
     uvec2 bounds_buffer[];
 };
 
+layout (push_constant) uniform PushConstant {
+    uint capacity; // sort buffer entries; the count is clamped to it (g2s fix)
+    uint _pad0;
+    uint _pad1;
+    uint _pad2;
+};
+
 void main() {
     const uint id = gl_GlobalInvocationID.x;
-    const uint count = sort_buffer_size;
+    const uint count = min(sort_buffer_size, capacity);
     if (id >= count) return;
 
     const uint tile_id = sort_buffer[id] >> 16;

@@ -112,6 +112,18 @@ def addons_current(project: Path) -> bool:
     return enable_plugins(text, PLUGINS) == text and (project / WORK_DIR / "command.json").exists()
 
 
+def ensure_ready(project: Path, godot: str) -> None:
+    """Addons installed and current, and the project imported once by Godot."""
+    project = Path(project)
+    if not addons_current(project):
+        for line in install(project):
+            print(f"install: {line}")
+    if not (project / ".godot" / "imported").is_dir() or not (
+            project / ".godot" / "global_script_class_cache.cfg").exists():
+        print("install: first import of the project by Godot", flush=True)
+        import_assets(project, godot)
+
+
 def run_godot(godot: str, args: list[str], timeout: float, prefix: str,
               quiet: bool = False) -> tuple[int, str]:
     """Run Godot, echoing its output line by line with `prefix`. Returns (exit code, output)."""
@@ -148,6 +160,13 @@ def import_assets(project: Path, godot: str, timeout: float = 3600.0) -> None:
     """Let Godot import new and changed files (the editor does the same on focus)."""
     code, out = run_godot(godot, ["--headless", "--path", str(project), "--import"],
                           timeout, "godot: ", quiet=True)
+    if code not in (0, 1, 255) and code != -1:
+        # A crash, not an error exit: Godot 4.7 on Windows can crash while closing after
+        # the first import that also enables the addons. What it imported is kept; one
+        # more run checks the rest and normally exits cleanly.
+        print(f"godot: --import crashed (exit code {code:#x}); running it once more", flush=True)
+        code, out = run_godot(godot, ["--headless", "--path", str(project), "--import"],
+                              timeout, "godot: ", quiet=True)
     for line in out.splitlines():
         if "[gdgs]" in line or line.startswith("ERROR") or line.startswith("SCRIPT ERROR"):
             print(f"godot: {line}", flush=True)

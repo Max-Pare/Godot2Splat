@@ -278,12 +278,16 @@ func _probe(at: Vector3) -> Array[PackedFloat32Array]:
 func _plan_positions() -> PackedVector3Array:
 	for view in _probe_views:
 		view.render_target_update_mode = SubViewport.UPDATE_ALWAYS
-	var rng := RandomNumberGenerator.new()
-	rng.seed = 1
+	# A grid cell is reached when an accepted position sees it. Box: only cells inside
+	# the box. Fill: any cell within fill_reach, except that cells which see mostly
+	# sky (outdoors) are not taken and the walk does not go on from them.
 	var spacing := _volume.camera_spacing
-	var candidates := Planner.candidates(_volume.global_transform, _volume.size, spacing, rng)
-	var reached := PackedByteArray()
-	reached.resize(candidates.size())
+	var fill := _volume.placement == Volume.Placement.FILL
+	var grid: Planner.Grid = Planner.Grid.fill(_volume.global_transform, spacing) if fill \
+			else Planner.Grid.box(_volume.global_transform, _volume.size, spacing)
+	var seen := {}
+	var outdoors := 0
+	var reach := ceili(2.5 * spacing / minf(grid.step.x, minf(grid.step.y, grid.step.z))) + 1
 
 	var queue := PackedVector3Array([_volume.global_position])
 	for child in _volume.get_children():
@@ -308,22 +312,44 @@ func _plan_positions() -> PackedVector3Array:
 				return PackedVector3Array()
 			too_close += 1
 			continue
+		if fill and next > seeds and Planner.sky_share(probe) > _volume.outdoor_sky_share:
+			outdoors += 1
+			continue
 		accepted.append(at)
-		for i in candidates.size():
-			if reached[i] == 0 and at.distance_to(candidates[i]) <= spacing * 2.5 \
-					and Planner.sees(probe, inverse_bases, PROBE_SIZE, at, candidates[i], 0.05):
-				reached[i] = 1
-				queue.append(candidates[i])
+		var here := grid.cell_of(at)
+		for dx in range(-reach, reach + 1):
+			for dy in range(-reach, reach + 1):
+				for dz in range(-reach, reach + 1):
+					var c := here + Vector3i(dx, dy, dz)
+					if not grid.contains(c) or seen.has(c):
+						continue
+					var to := grid.position(c)
+					if at.distance_to(to) > spacing * 2.5 \
+							or (fill and _volume.global_position.distance_to(to) > _volume.fill_reach) \
+							or not Planner.sees(probe, inverse_bases, PROBE_SIZE, at, to, 0.05):
+						continue
+					seen[c] = true
+					queue.append(to)
 		if next % 10 == 0:
 			_progress("finding free space: %d camera positions" % accepted.size())
 	for view in _probe_views:
 		view.render_target_update_mode = SubViewport.UPDATE_DISABLED
 
-	print("capture: %d of %d grid points are in reachable open space (%d too close to a surface)" % [
-			accepted.size() - seeds, candidates.size(), too_close])
-	if accepted.size() > _volume.max_positions:
-		print("capture: thinned to max_positions = %d. Raise it or the camera spacing to change this." % _volume.max_positions)
-		var chosen := Planner.spread(accepted, _volume.max_positions, seeds)
+	if fill:
+		var span := AABB(accepted[0], Vector3.ZERO)
+		for p in accepted:
+			span = span.expand(p)
+		print("capture: the open space reachable from the start point spans %.1f x %.1f x %.1f m: %d positions %.2f m apart (%d too close to a surface, %d outdoors)" % [
+				span.size.x, span.size.y, span.size.z, accepted.size(), spacing, too_close, outdoors])
+	else:
+		print("capture: %d of %d grid points are in reachable open space (%d too close to a surface)" % [
+				accepted.size() - seeds, grid.num_cells(), too_close])
+	var max_positions := _volume.max_positions if _volume.max_positions > 0 \
+			else Planner.auto_max_positions(_volume.image_size)
+	if accepted.size() > max_positions:
+		print("capture: thinned evenly to %d positions (%s)." % [max_positions,
+				"max_positions" if _volume.max_positions > 0 else "what training can hold at this image_size"])
+		var chosen := Planner.spread(accepted, max_positions, seeds)
 		var thinned := PackedVector3Array()
 		for i in chosen:
 			thinned.append(accepted[i])

@@ -151,6 +151,22 @@ def scene_text() -> str:
     return head + "\n".join(sub) + '\n[node name="Room" type="Node3D"]\n\n' + "\n".join(nodes)
 
 
+def room_data() -> dict:
+    """The room as plain data, for tests/unreal/build_room.py (Unreal's Python has no numpy).
+    Godot axes and metres; the builder converts."""
+    def box(entry):
+        name, centre, size, material, _ = entry
+        return {"name": name, "centre": list(centre), "size": list(size), "color": MATERIALS[material][0]}
+    name, centre, radius, material = SPHERE
+    return {
+        "boxes": [box(e) for e in SHELL + PROP_BOXES],
+        "sphere": {"name": name, "centre": list(centre), "radius": radius, "color": MATERIALS[material][0]},
+        "volume": VOLUME,
+        "sun_direction": [-1.0, -0.6, -0.25],
+        "lamp": [0.0, 2.3, 0.3],
+    }
+
+
 if __name__ == "__main__":
     out = Path(__file__).parent / "fixture_project" / "room.tscn"
     out.write_text(scene_text())
