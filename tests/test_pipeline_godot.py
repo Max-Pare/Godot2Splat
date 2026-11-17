@@ -132,3 +132,32 @@ def test_godot_shows_what_was_scanned(built, tmp_path):
         assert got.shape == want.shape, f"Godot rendered {got.shape}, the scan is {want.shape}"
         scores.append(-10 * np.log10(((want - got) ** 2).mean()))
     assert min(scores) > 28.0, dict(zip(names, np.round(scores, 1)))
+
+
+def test_splat_object_highlights_and_survives_a_rebuild(built):
+    """A SplatObject (ported from Real2Virtu) over the ball tints the ball and
+    nothing else, moves it, glows when the camera comes near, and is kept when
+    the splat scene is built again."""
+    project, _ = built
+    run = subprocess.run(
+        [GODOT, "--path", str(project), "--resolution", "640x480",
+         "--script", str(ROOT / "tests" / "godot" / "check_highlight.gd"),
+         "--", "--scene", "res://splats/room/room_splat.tscn", "--save"],
+        capture_output=True, text=True, timeout=600)
+    line = next((l for l in run.stdout.splitlines() if l.startswith("highlight: RESULT ")), None)
+    assert line, run.stdout[-3000:]
+    r = json.loads(line.removeprefix("highlight: RESULT "))
+    assert r["highlight"]["inside"] > 0.3 * r["highlight"]["ball_px"], r
+    assert r["highlight"]["outside"] < 0.02 * r["highlight"]["inside"], r
+    assert r["lift"]["inside"] + r["lift"]["outside"] > 0.3 * r["lift"]["ball_px"], r
+    assert r["near"] and r["glow"] > 0.05, r
+
+    run = subprocess.run(
+        [sys.executable, "-m", "g2s", "build", str(project), "res://room.tscn", "--steps", STEPS,
+         "--godot", GODOT, "--only", "export", "--force"],
+        cwd=ROOT, capture_output=True, text=True, timeout=1800)
+    assert run.returncode == 0, run.stdout[-3000:] + run.stderr[-3000:]
+    text = (project / "splats" / "room" / "room_splat.tscn").read_text()
+    assert '[node name="BallHighlight" type="Node3D" parent="."' in text
+    assert "res://addons/godot2splat/objects/splat_object.gd" in text
+    assert text.count('name="SplatPivot"') == 1      # rebuilt, not doubled

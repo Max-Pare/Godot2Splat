@@ -14,7 +14,8 @@ func _initialize() -> void:
 		return
 	var result := Builder.build(args[0])
 	if result["ok"]:
-		print("export: built %s (%d collision bodies copied)" % [result["scene"], result["bodies"]])
+		print("export: built %s (%d collision bodies copied, %d of your nodes kept)"
+				% [result["scene"], result["bodies"], result["kept"]])
 		quit(0)
 	else:
 		print("export: ERROR " + result["message"])

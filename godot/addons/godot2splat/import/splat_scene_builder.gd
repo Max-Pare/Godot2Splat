@@ -9,6 +9,9 @@ extends RefCounted
 ##     SplatEnvironment (WorldEnvironment)
 ##     Collision (Node3D)               copies of the source scene's static bodies
 ##
+## Everything else under the root (SplatObject highlight volumes, lights, your own
+## nodes) is yours: a rebuild keeps it. Changes to the nodes above are replaced.
+##
 ## Why two half turns: the gdgs importer centres the Gaussians on their mean, so
 ## the node has to sit there, and GaussianSplatNode turns itself by half a turn
 ## about Z when it enters the tree with an unrotated transform (it assumes a
@@ -21,10 +24,12 @@ extends RefCounted
 const SPLAT_NODE := "res://addons/gdgs/runtime/nodes/gaussian_splat_node.gd"
 const COMPOSITOR_EFFECT := "res://addons/gdgs/runtime/compositor/gaussian_compositor_effect.gd"
 const SKY_SHADER := "res://addons/godot2splat/import/panorama_sky.gdshader"
+## Children of the root that the builder makes; every other child is yours and is kept.
+const GENERATED: Array[StringName] = [&"SplatPivot", &"SplatEnvironment", &"Collision"]
 const HALF_TURN := Basis(Vector3(-1, 0, 0), Vector3(0, -1, 0), Vector3(0, 0, 1))
 
 
-## Returns {ok, message, scene, bodies}.
+## Returns {ok, message, scene, bodies, kept}.
 static func build(manifest_path: String) -> Dictionary:
 	var m: Variant = JSON.parse_string(FileAccess.get_file_as_string(manifest_path))
 	if typeof(m) != TYPE_DICTIONARY:
@@ -68,6 +73,7 @@ static func build(manifest_path: String) -> Dictionary:
 
 	for node in root.find_children("*", "", true, false):
 		node.owner = root
+	var kept := _keep_added_nodes(scene_path, root)
 	var packed := PackedScene.new()
 	var error := packed.pack(root)
 	if error == OK:
@@ -75,11 +81,39 @@ static func build(manifest_path: String) -> Dictionary:
 	root.free()
 	if error != OK:
 		return _error("cannot save %s (error %d)" % [scene_path, error])
-	return {"ok": true, "message": "", "scene": scene_path, "bodies": bodies}
+	return {"ok": true, "message": "", "scene": scene_path, "bodies": bodies, "kept": kept}
 
 
 static func _error(message: String) -> Dictionary:
-	return {"ok": false, "message": message, "scene": "", "bodies": 0}
+	return {"ok": false, "message": message, "scene": "", "bodies": 0, "kept": 0}
+
+
+## Moves what you added to an earlier build of the scene (SplatObjects, lights,
+## your own nodes: every child of its root that the builder does not make) into
+## the new one, so a rebuild keeps them. Returns how many were kept.
+static func _keep_added_nodes(scene_path: String, root: Node) -> int:
+	if not ResourceLoader.exists(scene_path):
+		return 0
+	var packed := ResourceLoader.load(scene_path, "", ResourceLoader.CACHE_MODE_IGNORE) as PackedScene
+	if packed == null:
+		return 0
+	var old := packed.instantiate()
+	var count := 0
+	for child in old.get_children():
+		if child.name in GENERATED:
+			continue
+		# Nodes saved in the scene itself; the insides of instanced scenes stay theirs.
+		var owned: Array[Node] = [child]
+		for node in child.find_children("*", "", true, false):
+			if node.owner == old:
+				owned.append(node)
+		old.remove_child(child)
+		root.add_child(child)
+		for node in owned:
+			node.owner = root
+		count += 1
+	old.free()
+	return count
 
 
 static func _environment(m: Dictionary) -> Environment:

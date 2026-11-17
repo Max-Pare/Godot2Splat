@@ -31,6 +31,7 @@ The rows above predate Fill placement, which is now the default; they used a box
 | Godot pipeline test (`pytest -m godot`, 2,500 steps) | passes: cameras in open air and none outside the window, held-out PSNR over 32 dB, Godot shows the scanned room |
 | Unreal capture of the same room (`tests/unreal/build_room.py`) | 300 pictures from 50 positions in 96 s, all inside the room (5 cells past the window rejected as outdoors); 5.8 million depth pixels median 0.2 mm, worst 3.5 mm (the engine's low-poly sphere) from the room's true surfaces |
 | Unreal pipeline test (`pytest -m unreal`, 2,500 steps) | 41.2 dB PSNR on 36 held-out pictures (worst 32.6), depth error 1.0 cm; scene built in the Godot project |
+| SplatObject highlight (Godot test room, a 0.64 m ellipsoid over the ball) | full highlight changes 3,936 pixels inside the ball's outline and 10 outside; lifting the object moves the ball; the proximity glow starts within 0.5 m; a rebuild keeps the node (`pytest -m godot`) |
 | A large Unreal level (World Partition, about 60 x 30 m of corridors), started from an actor | ran end to end. With the old fixed limit of 120 positions (one per 10 reachable spots) it scored only 19 dB, so the limit is now set from memory (390 positions at 800 px) |
 
 Not verified: scenes other than the test rooms (beyond the run above), the Mobile renderer, Linux with Unreal, and clicking either editor button by hand.
@@ -104,6 +105,33 @@ The capture opens a small Godot window for a few seconds. Godot's headless mode 
 | Output Dir | `res://splats/<scene>/` | where the splat and the generated scene go |
 
 `g2s build` options: `--steps`, `--cap` (override the node), `--train-scale` (percent of the picture size used for training), `--depth-weight`, `--workspace`, `--godot`, `--device auto|cuda|rocm`, `--only`, `--force`, `--no-godot-import`.
+
+## Highlighted objects (SplatObject)
+
+Ported from Real2Virtu. A part of the splat can glow when the player comes near, and move. A `SplatObject` node marks a shape. Every Gaussian whose centre is inside the shape when the game starts belongs to the object. Nothing is cut out of the splat file. The gdgs shader moves and tints those Gaussians.
+
+1. Open the generated `res://splats/<scene>/<scene>_splat.tscn` (or a scene that instances it).
+2. Add a `SplatObject` node and move it onto the object. The Gaussians it holds are tinted in the editor.
+3. Fit the shape: drag the dots on its faces, or set `Shape` (box, ellipsoid, cylinder) and `Size` in the inspector. Rotate the node to fit slanted objects.
+4. Set the behaviour in the inspector:
+   - `Trigger Distance`: how near the camera must come.
+   - The glow: `Highlight Color`, `Glow Strength`, `Glow Speed`.
+   - `Motion`: bob, wobble or spin, near the player or all the time.
+   - `Collision`: see below.
+
+`Collision` decides what happens to the scene's collision bodies (the copies under `Collision`) whose origin is inside the shape when the game starts:
+- `Follows` (default) moves them with the object.
+- `Stays` leaves them where the object was scanned.
+- `None` switches them off.
+
+For your own behaviour, connect the `player_entered` and `player_exited` signals. You can also move the node from a script or an `AnimationPlayer` with `Motion` set to none: the Gaussians follow the node. Scripts can also set `highlight_strength` and `opacity`.
+
+- Rebuilding the splat scene (`g2s build`, the editor button) keeps every node you added under its root, SplatObjects included. Only `SplatPivot`, `SplatEnvironment` and `Collision` are made anew, so changes to those are lost.
+- The shape takes whatever is inside it, including bits of floor or wall: an ellipsoid fits round things better than a box. Where shapes overlap, the first node in the tree wins.
+- The scan has nothing behind an object, so moving or fading it shows a gap.
+- At most 32 per scene. Needs the Compute renderer (the default); the Raster renderer ignores them with a warning.
+
+`SplatObject` is `addons/godot2splat/objects/splat_object.gd`. It extends gdgs's `GaussianSplatVolume`, which the bundled gdgs already had from Real2Virtu, shader support included. Real2Virtu's `SplatObject` also cut its part out of the TSDF collision mesh and the vertex-coloured backdrop. g2s has neither: its collision is copies of the source scene's static bodies, so whole bodies follow instead.
 
 ## Scanning an Unreal level
 
@@ -246,6 +274,7 @@ Copied, so this repository stands alone:
 | `src/g2s/geometry.py` | parts of `stages/ingest.py` | `backproject`, `thin`, `scale_K` |
 | `src/g2s/evaluate.py` | `tools/eval_render.py` | scores held-out views |
 | `scripts/`, `tests/test_gsplat_gpu.py` and others | same | names only |
+| `godot/addons/godot2splat/objects/splat_object.gd` | `godot_template/scripts/splat_object.gd` | collision follows whole static bodies instead of cut mesh triangles; no backdrop mesh |
 | `godot/addons/gdgs` | `godot_template/addons/gdgs` | GDGS 3.3.0 (MIT, ReconWorldLab) with one fix: close to large splats the tile sort buffer overflowed and the picture showed flat grey squares; entries past its capacity are now dropped, and the buffer holds 16 entries per splat instead of 10 |
 
 Not needed here: video frames, COLMAP, alignment, pose refinement, TSDF collision.
