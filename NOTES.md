@@ -1,11 +1,22 @@
 # Project notes
 
 Working notes: what was found, what went wrong, what is still open. README.md describes how
-to use the tool; this file records the state of the work. Last updated 2026-11-17.
+to use the tool; this file records the state of the work. Last updated 2026-11-18.
 
 ## Open problems
 
-### Training collapses on large Unreal levels (cause found, fix to confirm on the 5090)
+### Training collapses on large Unreal levels (fixed, confirmed on the 5090)
+
+5090 rerun with the fix, 2026-11-18: new capture of the same level (390 positions, 2,106
+training views, 800 px), default 20k steps, cap 1.2M. Faint share 11% at 500, peak 32% at
+9-10k, down to 25% when relocation stopped (16.6k), 32% at the end. Held-out PSNR 21.20 dB
+after training (was 18.50), 22.08 dB after clean (was 19.00). Clean removed 385,955 as
+transparent (was 898,765) and 101,185 hidden; 669,464 Gaussians exported (was 240,733).
+The rise after relocation stops comes from the picture itself (no regulariser then):
+Gaussians it pushes transparent are no longer recycled. Clean drops them.
+
+Next on this level: the cap. It was reached at step 3,000 and training used 1.5 GB of the
+5090's memory, so more Gaussians fit. Try `--cap 4000000 --steps 40000`.
 
 **Cause: the opacity regulariser.** It is a tiny, steady push down on opacity, and Adam
 turns a push with nothing against it into a full-size step. Before the fix, every Gaussian
@@ -34,9 +45,6 @@ The fix (`train.regularise`): the regulariser goes only to Gaussians whose opaci
 gradient from the picture, and stops when relocation stops. Held-out PSNR on this capture
 stays near 20 dB whatever the run; it is limited by the capture (720 Box views, held-out
 views looking at blown-out sky), not by the fading.
-
-Still to confirm: the same 5090 run with the fix. Expect a faint share that stops climbing
-and cleanup removing far fewer than 898k.
 
 Earlier investigation, kept for reference:
 
