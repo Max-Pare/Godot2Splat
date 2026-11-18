@@ -83,6 +83,19 @@ def regularise(params, opacity_reg: float, scale_reg: float) -> None:
         g_sc[drew] += scale_reg * torch.exp(params["scales"][drew]) / (n * params["scales"].shape[1])
 
 
+def viewing_distance(depths, depth_unit: float) -> float:
+    """Median distance (metres, along the view axis) from the cameras to the surfaces
+    they see, from a sample of the depth maps (0 = no surface). 1 m without any."""
+    import torch
+
+    step = max(1, len(depths) // 200)
+    sample = torch.cat([d[::4, ::4].flatten() for d in depths[::step]])
+    sample = sample[sample > 0]
+    if len(sample) == 0:
+        return 1.0
+    return float(sample.float().median()) * depth_unit
+
+
 def _ssim(a, b):
     """Mean SSIM of two [3,H,W] images, 11 px Gaussian window."""
     import torch
@@ -363,8 +376,17 @@ def run(ws: Workspace, cfg: Config) -> None:
     print(f"train: {len(scene['points'])} start points -> {steps} steps, at most {cap} Gaussians",
           flush=True)
     params = _init_params(scene, c, cap, device)
+    # The position learning rate (and with it MCMC's position noise) follows the size
+    # of what the cameras look at. 3DGS takes the spread of the cameras, made for
+    # cameras around an object. Ours stand inside the scene: on a level the spread is
+    # ten times the distance to the walls, and a long run kept knocking Gaussians off
+    # the surfaces until training collapsed (NOTES.md). So the viewing distance, if smaller.
     centres = scene["c2w"][which, :3, 3]
-    scene_scale = float(np.linalg.norm(centres - centres.mean(axis=0), axis=1).max()) * 1.1
+    spread = float(np.linalg.norm(centres - centres.mean(axis=0), axis=1).max())
+    seen_at = viewing_distance(depths, depth_unit)
+    scene_scale = min(spread, seen_at) * 1.1
+    print(f"train: cameras spread over {spread:.1f} m, see surfaces at {seen_at:.1f} m; "
+          f"positions move at the scale of {scene_scale:.1f} m", flush=True)
 
     lrs = {"means": 1.6e-4 * scene_scale, "scales": 5e-3, "quats": 1e-3,
            "opacities": 5e-2, "sh0": 2.5e-3, "shN": 2.5e-3 / 20}

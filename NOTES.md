@@ -5,9 +5,43 @@ to use the tool; this file records the state of the work. Last updated 2026-11-1
 
 ## Open problems
 
-### Training collapses on large Unreal levels (fixed, confirmed on the 5090)
+### Training collapses on large Unreal levels (second cause fixed, to confirm on the 5090)
 
-5090 rerun with the fix, 2026-11-18: new capture of the same level (390 positions, 2,106
+**Second cause: the position learning rate.** 5090, same capture, `--cap 4000000 --steps
+40000`: faint share 30% at 5.5k, 57% at 10k, 85% at the end; loss and depth error climbing
+from 7.5k (single views 2-3 m off). Held-out 13.63 dB; clean left 3 Gaussians (3.4M
+transparent, 560k hidden) and export replaced the splat in the Godot project with them.
+
+Reproduced on this machine with the old corridor capture (720 views, 50% size, 4M cap):
+a 40k-step schedule cut at 15k gives 49% faint at 14k and climbing, 830k hidden, 17.8 dB.
+The same at 12k steps stays at 28%: the long schedule is what hurts. The position learning
+rate (`1.6e-4 x scene scale`, decaying to 1% over the run) and with it MCMC's position
+noise were scaled to the camera spread, 37 m here: right for cameras around an object,
+ten times too much for cameras inside a level, whose walls are ~2 m away. A long run keeps
+it high for longer and knocks Gaussians off the surfaces.
+
+| 40k schedule, cut at 15k, 4M cap | faint at 14k | hidden (clean) | held-out train / clean |
+|---|---|---|---|
+| scale = camera spread (37 m) | 49%, climbing | 830k | 17.83 / 15.81 dB |
+| scale = viewing distance (1.8 m) | 14%, flat | 65k | 20.08 / 19.51 dB |
+
+Fix (`train.viewing_distance`): scene scale is the median depth the cameras see, if smaller
+than the spread. Tried before and dismissed at 5k steps (no difference there); the
+difference only shows in long runs. Also tried: handing Gaussians that no view has shown
+for two passes to MCMC (hidden ones never fade, so relocation picks them more): it moved
+only 1,800 of 510k "hidden"; those still draw a little, so not the cause. Reverted.
+
+Also fixed on the way:
+- The held-out score laid the render over the photo, so a missing surface scored as
+  perfect: 3 Gaussians scored 85 dB. Now over the background colour Godot shows. Scores
+  before 2026-11-18 are too high wherever the splat had holes, and clean "improving" PSNR
+  (strays below, 19.96 -> 20.40) was partly that: with the honest score clean costs 0.6 to
+  1.2 dB on the corridor. Which of its removals costs most is not measured yet; the
+  transparent ones (under 0.02 opacity, a million or more) are the first suspect.
+- Clean stops before export when it keeps under 5% (`CleanCfg.min_kept_share`): the Godot
+  project keeps its previous splat.
+
+First fix, 5090 rerun, 2026-11-18: new capture of the same level (390 positions, 2,106
 training views, 800 px), default 20k steps, cap 1.2M. Faint share 11% at 500, peak 32% at
 9-10k, down to 25% when relocation stopped (16.6k), 32% at the end. Held-out PSNR 21.20 dB
 after training (was 18.50), 22.08 dB after clean (was 19.00). Clean removed 385,955 as
@@ -15,10 +49,7 @@ transparent (was 898,765) and 101,185 hidden; 669,464 Gaussians exported (was 24
 The rise after relocation stops comes from the picture itself (no regulariser then):
 Gaussians it pushes transparent are no longer recycled. Clean drops them.
 
-Next on this level: the cap. It was reached at step 3,000 and training used 1.5 GB of the
-5090's memory, so more Gaussians fit. Try `--cap 4000000 --steps 40000`.
-
-**Cause: the opacity regulariser.** It is a tiny, steady push down on opacity, and Adam
+**First cause: the opacity regulariser.** It is a tiny, steady push down on opacity, and Adam
 turns a push with nothing against it into a full-size step. Before the fix, every Gaussian
 in the camera's view got it, also those hidden behind walls, which the picture gives no
 gradient. In a level of many rooms each frame has most of the level in view, hidden, so
@@ -91,6 +122,26 @@ Next steps:
 4. Possible guard: stop or warn when the share of Gaussians under 0.02 opacity keeps rising,
    and keep the best checkpoint by held-out score.
 
+### Corridor splat brighter and flatter than the level (fixed, to confirm on the 5090)
+
+Seen in Godot on the 5090 corridor splat: much brighter and flatter than the level in
+Unreal, lights still visible. The capture pictures themselves were like that (eval pictures:
+windows and sunlit floor clipped to white), so not training or Godot. Cause: the exposure
+meter ignored the level's post process volumes. `PPV_Global` and the hallway volumes hold
+auto exposure to EV100 8 (9 in the green hallway) to 12. The meter measured 4.78 at
+`SplatStart` and used it: every picture 3.2 stops (about 9x) too bright, highlights pushed
+into the tonemapper's shoulder, so the contrast went flat.
+
+Fix (`LevelExposureAt` in CaptureJob.cpp): the meter blends the level's volumes at the start
+point the way the renderer does (priority, blend weight and radius) and clamps the measured
+EV100 to their Min/Max. Their Exposure Compensation is used too; the capture volume's
+`Exposure Compensation` is now added on top, default 0 (was 1, Unreal's default, which the
+level's value now supplies). The hallways also differ in colour grading; that stays per
+view, as in the game.
+
+Still to confirm on the 5090: the capture log should say "measured at the start point as
+4.78, held to the level's range 8.00 to 12.00".
+
 ### Strays outside the level (fixed)
 
 Seen in Godot on the 5090 corridor splat: the splat node's bounding box many times larger than
@@ -102,7 +153,8 @@ whatever they drifted to. On the old corridor run 20% of the cleaned splat was s
 
 Clean now drops them (`hidden`, `CleanCfg.drop_hidden`): behind the surface by more than
 10 cm / 5% in every view that has them in its picture. 20k-step corridor run: 98,975
-removed, held-out PSNR 19.96 -> 20.40 dB, box 34.5 x 14.2 x 71.1 -> 33.2 x 4.4 x 62.3 m.
+removed, held-out PSNR 19.96 -> 20.40 dB (old score, too kind to holes; see above), box
+34.5 x 14.2 x 71.1 -> 33.2 x 4.4 x 62.3 m.
 
 Also from that look: the splat sat ~90 m from the Godot origin, where the level is in
 Unreal's world. Unreal exports now put the capture volume's position (the start actor) at

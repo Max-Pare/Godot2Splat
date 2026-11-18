@@ -54,6 +54,8 @@ class TrainCfg:
 @dataclass
 class CleanCfg:
     min_opacity: float = 0.02         # below this a Gaussian only adds haze
+    # Fewer kept than this share means training failed: stop before export.
+    min_kept_share: float = 0.05
     # Size limits are the larger of a fixed length (metres) and a share of the
     # distance to the nearest camera, so far scenery seen through windows survives.
     max_size: float = 0.3

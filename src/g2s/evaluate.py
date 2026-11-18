@@ -4,7 +4,8 @@ Renders the splat from the held-out cameras (rendering only, no training) and
 compares with the pictures Godot rendered there:
   full colour  - as training sees it (view-dependent colour)
   base colour  - without the view-dependent part
-Pixels where the scene has no surface (sky) are left out. Side-by-side pictures
+Pixels where the scene has no surface (sky) are left out; where the splat is clear
+on a surface, the background colour shows, as in Godot. Side-by-side pictures
 (Godot | full colour | base colour) go to <workspace>/eval/<stage>.
 """
 from __future__ import annotations
@@ -31,6 +32,20 @@ def psnr(a, b, mask=None) -> float:
     return -10 * torch.log10(err.mean().clamp_min(1e-10)).item()
 
 
+def backdrop_colour(params):
+    """What Godot shows where the splat is clear and no sky was captured: the
+    opacity-weighted mean base colour (as export.mean_colour), a [3] tensor."""
+    import torch
+
+    from . import splat_io
+
+    if len(params["means"]) == 0:
+        return torch.zeros(3, device=params["means"].device)
+    rgb = (0.5 + splat_io.SH_C0 * params["sh0"][:, 0, :]).clamp(0, 1)
+    weight = torch.sigmoid(params["opacities"].flatten())[:, None] + 1e-9
+    return (rgb * weight).sum(dim=0) / weight.sum()
+
+
 def score(ws: Workspace, cfg: Config, stage: str) -> dict:
     """PSNR and depth error of the `stage` checkpoint ("train" or "clean")."""
     import cv2
@@ -49,6 +64,7 @@ def score(ws: Workspace, cfg: Config, stage: str) -> dict:
     params = {k: v.to(dev) for k, v in
               torch.load(ws.dir(stage) / "ckpt.pt", map_location=dev).items()}
     degree = int(round((params["shN"].shape[1] + 1) ** 0.5)) - 1
+    backdrop = backdrop_colour(params)
     unit = float(scene["depth_unit"])
     out = ws.root / "eval" / stage
     out.mkdir(parents=True, exist_ok=True)
@@ -70,9 +86,11 @@ def score(ws: Workspace, cfg: Config, stage: str) -> dict:
             K = torch.tensor(scene["K"][i], dtype=torch.float32, device=dev)
             a, alpha, _ = train.render(params, c2w, K, w, h, degree, mode="RGB+ED")
             b = train.render(params, c2w, K, w, h, 0)[0]
-            # Where the splat is clear the game shows what lies behind; score it over the picture.
-            a_rgb = (a[..., :3] + (1 - alpha) * gt).clamp(0, 1)
-            b_rgb = (b[..., :3] + (1 - alpha) * gt).clamp(0, 1)
+            # Only pixels with a surface are scored. Where the splat is clear there, the
+            # game shows the scene's background colour, not the surface: score it so.
+            # (Scoring over the picture itself gave an empty splat a perfect score.)
+            a_rgb = (a[..., :3] + (1 - alpha) * backdrop).clamp(0, 1)
+            b_rgb = (b[..., :3] + (1 - alpha) * backdrop).clamp(0, 1)
             full.append(psnr(a_rgb, gt, solid))
             base.append(psnr(b_rgb, gt, solid))
             depth_err.append(float(train.depth_loss(a[..., 3], depth)))

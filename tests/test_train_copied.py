@@ -19,6 +19,16 @@ def test_regulariser_reaches_only_gaussians_that_drew_something():
     assert g_sc[1].abs().sum() == 0 and torch.allclose(g_sc[0], torch.full((3,), 0.01 / 6))
 
 
+def test_viewing_distance_is_the_median_surface_depth():
+    from g2s.stages.train import viewing_distance
+
+    near = torch.full((40, 40), 1500, dtype=torch.int32)   # 1.5 m in mm steps
+    far = torch.full((40, 40), 9000, dtype=torch.int32)
+    far[:20] = 0                                            # sky: no surface
+    assert abs(viewing_distance([near, near, far], 0.001) - 1.5) < 1e-6
+    assert viewing_distance([torch.zeros(8, 8, dtype=torch.int32)], 0.001) == 1.0
+
+
 def test_loss_without_convolutions_matches_the_convolution_one():
     from g2s.stages.train import _photo_loss_conv, _photo_loss_shifted
 

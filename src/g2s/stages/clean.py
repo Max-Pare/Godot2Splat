@@ -177,3 +177,9 @@ def run(ws: Workspace, cfg: Config) -> None:
 
     from .. import evaluate
     evaluate.report(ws, cfg, "clean")
+    if stats["after"] < c.min_kept_share * n0:
+        # A healthy run keeps about half. Exporting this would replace the splat in the
+        # Godot project with almost nothing.
+        raise SystemExit(f"clean: only {stats['after']} of {n0} Gaussians are left; training failed. "
+                         f"Nothing was exported: the Godot project keeps its previous splat. "
+                         f"Check the train log's faint share and the pictures in {ws.root / 'eval'}.")

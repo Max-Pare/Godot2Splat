@@ -116,7 +116,8 @@ public:
 
 	/**
 	 * Exposure is the same for every picture. By default it is measured once at the
-	 * start point, as auto exposure would set it, unless a post process volume sets
+	 * start point, as the level's auto exposure would set it there (within the Min and
+	 * Max EV100 of its post process volumes), unless a post process volume sets
 	 * Manual exposure (then that is used). Turn this on to give the EV100 yourself.
 	 */
 	UPROPERTY(EditAnywhere, Category = "Splat Capture|Rendering", meta = (InlineEditConditionToggle))
@@ -125,9 +126,12 @@ public:
 	UPROPERTY(EditAnywhere, Category = "Splat Capture|Rendering", meta = (EditCondition = "bOverrideExposure", UIMin = "-10", UIMax = "20"))
 	float ExposureEV100 = 10.f;
 
-	/** Added to the measured exposure, in stops. Unreal's own default is 1. */
+	/**
+	 * Added to the level's own exposure compensation at the start point (its post
+	 * process volumes' Exposure Compensation, 1 by default), in stops.
+	 */
 	UPROPERTY(EditAnywhere, Category = "Splat Capture|Rendering", meta = (UIMin = "-5", UIMax = "5"))
-	float ExposureCompensation = 1.f;
+	float ExposureCompensation = 0.f;
 
 	/** Upper limit on Gaussians. 0 sizes it to the scan. */
 	UPROPERTY(EditAnywhere, Category = "Splat Capture|Training", meta = (ClampMin = "0", ClampMax = "6000000"))

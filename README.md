@@ -167,7 +167,7 @@ How the Unreal scan differs from the Godot one:
 
 - The editor's level is scanned, not a running game: nothing moves anyway, and Blueprints' construction scripts have run, their BeginPlay has not.
 - Each view is rendered `Warmup Frames` times (default 16) before the picture is taken, so that temporal anti-aliasing and Lumen settle after the camera moves.
-- Exposure is the same for every picture. It is measured once at the start point, the way Unreal's auto exposure would (plus `Exposure Compensation`, default 1 like Unreal's), unless a post process volume there sets Manual exposure. Tick `Exposure EV100` on the volume to set it yourself.
+- Exposure is the same for every picture. It is measured once at the start point, the way the level's auto exposure would set it there: within the Min and Max EV100 of the post process volumes at that point, with their Exposure Compensation (plus the volume's `Exposure Compensation`, default 0). A post process volume there that sets Manual exposure is used as it is. Tick `Exposure EV100` on the volume to set it yourself. Levels whose rooms have different exposure ranges get the start point's range everywhere.
 - Switched off unless `Keep Screen Space Effects`: screen-space reflections, SSAO, bloom, lens flares, depth of field, motion blur, vignette, grain, chromatic aberration.
 - World Partition levels: the region around the volume or `--origin` actor is loaded for the scan (`Fill Reach` plus 100 m around it).
 - During the scan the level viewports stop drawing every frame (a temporary Realtime override, removed afterwards; your own setting is kept): the pictures come from the scan's own cameras, so the GPU goes to them.
@@ -219,7 +219,7 @@ Effects that differ from view to view (SSR, SSAO, SSIL, glow, depth of field, au
 
 **Training.** gsplat with the MCMC strategy, as in Real2Virtu. Poses, intrinsics and depth are exact, so nothing about the cameras is learned. Pixels where the scene has no surface (sky) are kept out of the splat: there the render is laid over the picture itself, so staying clear is the best the splat can do; on surfaces it is laid over a random colour, so it has to be opaque.
 
-**Clean.** Removes near-transparent, oversized, needle-shaped and isolated Gaussians, any that float in space the depth maps show as empty, and any that no view shows (behind the surface in every view: strays above ceilings, below floors and inside walls, which would otherwise stretch the splat's bounding box far past the level).
+**Clean.** Removes near-transparent, oversized, needle-shaped and isolated Gaussians, any that float in space the depth maps show as empty, and any that no view shows (behind the surface in every view: strays above ceilings, below floors and inside walls, which would otherwise stretch the splat's bounding box far past the level). If it keeps under 5% of the Gaussians, training failed: the build stops there and the Godot project keeps its previous splat.
 
 **Export.** Writes `<scene>.ply` (centred on its mean position), `<scene>_sky.png` when the scan saw the sky, and builds `<scene>_splat.tscn`:
 

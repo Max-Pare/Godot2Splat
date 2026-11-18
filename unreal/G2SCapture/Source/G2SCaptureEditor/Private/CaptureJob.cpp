@@ -65,6 +65,80 @@ namespace
 	{
 		return 0.2126f * C.R + 0.7152f * C.G + 0.0722f * C.B;
 	}
+
+	/**
+	 * The level's auto exposure settings for a view at a point: the project defaults,
+	 * then every post process volume there, blended the way the renderer does it
+	 * (UWorld::AddPostProcessingSettings, FSceneView::OverridePostProcessSettings): in
+	 * order of priority, unbound volumes first among equals, each weighted by its blend
+	 * weight and blend radius. Only the auto exposure fields; the scan needs no others.
+	 * Min and max brightness are returned in EV100 whatever the project setting.
+	 */
+	FPostProcessSettings LevelExposureAt(UWorld* W, const FVector& At)
+	{
+		struct FEntry
+		{
+			FPostProcessVolumeProperties Props;
+			float Weight;
+		};
+		TArray<FEntry> Entries;
+		for (IInterface_PostProcessVolume& PPV : W->GetPostProcessVolumeIterator())
+		{
+			const FPostProcessVolumeProperties Props = PPV.GetProperties();
+			if (!Props.bIsEnabled || Props.Settings == nullptr)
+			{
+				continue;
+			}
+			float Weight = FMath::Clamp(Props.BlendWeight, 0.f, 1.f);
+			if (!Props.bIsUnbound)
+			{
+				float Distance = 0.f;
+				PPV.EncompassesPoint(At, 0.f, &Distance);
+				if (Distance < 0.f || Distance > Props.BlendRadius)
+				{
+					continue;
+				}
+				if (Props.BlendRadius >= 1.f)
+				{
+					Weight *= 1.f - Distance / Props.BlendRadius;
+				}
+			}
+			if (Weight > 0.f)
+			{
+				Entries.Add({Props, Weight});
+			}
+		}
+		Entries.StableSort([](const FEntry& A, const FEntry& B)
+		{
+			return A.Props.Priority != B.Props.Priority ? A.Props.Priority < B.Props.Priority
+				: A.Props.bIsUnbound && !B.Props.bIsUnbound;
+		});
+
+		FPostProcessSettings Out;  // the project's defaults
+		for (const FEntry& E : Entries)
+		{
+			const FPostProcessSettings& S = *E.Props.Settings;
+			if (S.bOverride_AutoExposureMethod) Out.AutoExposureMethod = S.AutoExposureMethod;
+			if (S.bOverride_AutoExposureApplyPhysicalCameraExposure) Out.AutoExposureApplyPhysicalCameraExposure = S.AutoExposureApplyPhysicalCameraExposure;
+			if (S.bOverride_AutoExposureBias) Out.AutoExposureBias = FMath::Lerp(Out.AutoExposureBias, S.AutoExposureBias, E.Weight);
+			if (S.bOverride_AutoExposureMinBrightness) Out.AutoExposureMinBrightness = FMath::Lerp(Out.AutoExposureMinBrightness, S.AutoExposureMinBrightness, E.Weight);
+			if (S.bOverride_AutoExposureMaxBrightness) Out.AutoExposureMaxBrightness = FMath::Lerp(Out.AutoExposureMaxBrightness, S.AutoExposureMaxBrightness, E.Weight);
+		}
+		IConsoleVariable* Extended = IConsoleManager::Get().FindConsoleVariable(TEXT("r.DefaultFeature.AutoExposure.ExtendDefaultLuminanceRange"));
+		if (Extended == nullptr || Extended->GetInt() == 0)
+		{
+			// Without the extended range the limits are white point luminances.
+			float LensAttenuation = 0.78f;
+			if (IConsoleVariable* CVar = IConsoleManager::Get().FindConsoleVariable(TEXT("r.EyeAdaptation.LensAttenuation")))
+			{
+				LensAttenuation = CVar->GetFloat();
+			}
+			const float LuminanceMax = 0.78f / FMath::Max(LensAttenuation, 0.01f);
+			Out.AutoExposureMinBrightness = FMath::Log2(FMath::Max(Out.AutoExposureMinBrightness, 1e-6f) / LuminanceMax);
+			Out.AutoExposureMaxBrightness = FMath::Log2(FMath::Max(Out.AutoExposureMaxBrightness, 1e-6f) / LuminanceMax);
+		}
+		return Out;
+	}
 }
 
 FG2SCaptureJob::FG2SCaptureJob(UWorld* InWorld, ASplatCaptureVolume* InVolume, const FString& InOutDir, const FString& InMapPath)
@@ -548,16 +622,10 @@ bool FG2SCaptureJob::TickMeter()
 	UWorld* W = World.Get();
 	const FVector At = V->GetActorLocation();
 
-	// A post process volume with Manual exposure already fixes it for every view.
-	for (IInterface_PostProcessVolume& PPV : W->GetPostProcessVolumeIterator())
-	{
-		const FPostProcessVolumeProperties Props = PPV.GetProperties();
-		if (Props.bIsEnabled && Props.Settings != nullptr && (Props.bIsUnbound || PPV.EncompassesPoint(At, 0.f, nullptr))
-			&& Props.Settings->bOverride_AutoExposureMethod && Props.Settings->AutoExposureMethod == AEM_Manual)
-		{
-			bManualSceneExposure = true;
-		}
-	}
+	// What the level's own auto exposure would do at the start point.
+	const FPostProcessSettings Level = LevelExposureAt(W, At);
+	// Manual exposure in the level already fixes it for every view.
+	bManualSceneExposure = Level.AutoExposureMethod == AEM_Manual;
 	if (bManualSceneExposure)
 	{
 		Note(TEXT("exposure: the level's post process volume sets Manual exposure; used as it is."));
@@ -566,6 +634,7 @@ bool FG2SCaptureJob::TickMeter()
 	}
 
 	float EV100 = V->ExposureEV100;
+	float Measured = EV100;
 	if (!V->bOverrideExposure)
 	{
 		if (Counter == 0)
@@ -609,10 +678,16 @@ bool FG2SCaptureJob::TickMeter()
 			LensAttenuation = CVar->GetFloat();
 		}
 		const float LuminanceMax = 0.78f / FMath::Max(LensAttenuation, 0.01f);
-		EV100 = FMath::Log2(AverageLuminance / (0.18f * LuminanceMax));
+		Measured = FMath::Log2(AverageLuminance / (0.18f * LuminanceMax));
+		// The level's Min and Max EV100 hold auto exposure in a range. Dark levels
+		// often set it so that they stay dark: without it, the scan comes out
+		// several stops brighter than the game.
+		EV100 = FMath::Clamp(Measured, FMath::Min(Level.AutoExposureMinBrightness, Level.AutoExposureMaxBrightness),
+			Level.AutoExposureMaxBrightness);
 	}
 	// Manual exposure without the physical camera: EV100 0, shifted by the bias.
-	ExposureBias = V->ExposureCompensation - EV100;
+	const float Compensation = Level.AutoExposureBias + V->ExposureCompensation;
+	ExposureBias = Compensation - EV100;
 	FPostProcessSettings& PP = Colour->PostProcessSettings;
 	PP.bOverride_AutoExposureMethod = true;
 	PP.AutoExposureMethod = AEM_Manual;
@@ -621,8 +696,18 @@ bool FG2SCaptureJob::TickMeter()
 	PP.bOverride_AutoExposureBias = true;
 	PP.AutoExposureBias = ExposureBias;
 	Colour->PostProcessBlendWeight = 1.f;
-	Note(FString::Printf(TEXT("exposure fixed for every picture at EV100 %.2f (%s), compensation %+.1f."),
-		EV100, V->bOverrideExposure ? TEXT("set on the volume") : TEXT("measured at the start point"), V->ExposureCompensation));
+	FString Source = TEXT("set on the volume");
+	if (!V->bOverrideExposure)
+	{
+		Source = TEXT("measured at the start point");
+		if (!FMath::IsNearlyEqual(Measured, EV100, 0.005f))
+		{
+			Source += FString::Printf(TEXT(" as %.2f, held to the level's range %.2f to %.2f"), Measured,
+				Level.AutoExposureMinBrightness, Level.AutoExposureMaxBrightness);
+		}
+	}
+	Note(FString::Printf(TEXT("exposure fixed for every picture at EV100 %.2f (%s), compensation %+.2f (level %+.2f, volume %+.2f)."),
+		EV100, *Source, Compensation, Level.AutoExposureBias, V->ExposureCompensation));
 	for (USceneCaptureComponent2D* Meter : MeterCaptures)
 	{
 		Meter->DestroyComponent();
