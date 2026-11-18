@@ -14,6 +14,7 @@ Result in the ingest folder:
 from __future__ import annotations
 
 import json
+import time
 from pathlib import Path
 
 import numpy as np
@@ -21,6 +22,22 @@ import numpy as np
 from .. import geometry
 from ..config import Config
 from ..workspace import Workspace
+
+
+class Progress:
+    """Prints "ingest: <what> k of n" about every tenth of the way, with the time taken."""
+
+    def __init__(self, what: str, n: int):
+        self.what, self.n = what, n
+        self.every = max(1, -(-n // 10))
+        self.started = time.perf_counter()
+
+    def __call__(self, k: int, extra: str = "") -> None:
+        """`k` items done so far (1 to n)."""
+        if k % self.every and k != self.n:
+            return
+        seconds = time.perf_counter() - self.started
+        print(f"ingest: {self.what} {k} of {self.n}{extra}, {seconds:.0f} s", flush=True)
 
 
 def load_capture(ws: Workspace) -> dict:
@@ -47,6 +64,21 @@ def read_depth_file(path: Path, width: int, height: int) -> np.ndarray:
     return raw.reshape(height, width, 3)
 
 
+def start_points(image: Path, mm: np.ndarray, c2w: np.ndarray, K_depth: np.ndarray, c):
+    """Start points for training from one view: the scene surfaces it sees (every
+    `point_stride`-th depth pixel, one per voxel), coloured from its picture."""
+    import cv2
+
+    bgr = cv2.imread(str(image))
+    if bgr is None:
+        raise SystemExit(f"ingest: missing image {image.name}")
+    small = cv2.resize(bgr, (mm.shape[1], mm.shape[0]), interpolation=cv2.INTER_AREA)
+    sparse = np.zeros_like(mm)
+    sparse[::c.point_stride, ::c.point_stride] = mm[::c.point_stride, ::c.point_stride]
+    p, vu = geometry.backproject(sparse / 1000.0, K_depth, c2w)
+    return geometry.thin(p, small[vu[:, 0], vu[:, 1], ::-1], c.voxel)
+
+
 def run(ws: Workspace, cfg: Config) -> None:
     import cv2
 
@@ -61,7 +93,8 @@ def run(ws: Workspace, cfg: Config) -> None:
 
     c2ws = [geometry.camera_from_godot(v["transform"]) for v in views]
     depths_mm = []
-    for v in views:
+    progress = Progress("depth maps read", len(views))
+    for k, v in enumerate(views, 1):
         try:
             depths_mm.append(geometry.decode_depth(
                 read_depth_file(src / "depth" / f"{v['name']}.bin", dw, dh), float(cap["far"])))
@@ -69,6 +102,7 @@ def run(ws: Workspace, cfg: Config) -> None:
             raise SystemExit(
                 f"ingest: depth of view {v['name']}: {err}. The renderer altered the depth pass "
                 f"output; physical light units or a custom exposure on the project are likely causes.")
+        progress(k)
     unit_mm = geometry.depth_unit_for(max(int(d.max()) for d in depths_mm))
 
     d = ws.reset("ingest")
@@ -79,28 +113,22 @@ def run(ws: Workspace, cfg: Config) -> None:
     chunks_p, chunks_c = [np.zeros((0, 3))], [np.zeros((0, 3), dtype=np.uint8)]
     gathered, limit = 0, 4 * c.max_points
     empty_views = 0
-    for v, c2w, mm in zip(views, c2ws, depths_mm):
+    progress = Progress("views processed", len(views))
+    for k, (v, c2w, mm) in enumerate(zip(views, c2ws, depths_mm), 1):
         counts = np.rint(mm / unit_mm).astype(np.uint16)
         cv2.imwrite(str(d / "depth" / f"{v['name']}.png"), counts)
         empty_views += bool((counts == 0).any())
-        if v["split"] != "train":
-            continue
-        # Start points for training: scene surfaces seen in this view, coloured from it.
-        bgr = cv2.imread(str(src / "images" / f"{v['name']}.png"))
-        if bgr is None:
-            raise SystemExit(f"ingest: missing image {v['name']}.png")
-        small = cv2.resize(bgr, (dw, dh), interpolation=cv2.INTER_AREA)
-        sparse = np.zeros_like(mm)
-        sparse[::c.point_stride, ::c.point_stride] = mm[::c.point_stride, ::c.point_stride]
-        p, vu = geometry.backproject(sparse / 1000.0, K_depth, c2w)
-        p, rgb = geometry.thin(p, small[vu[:, 0], vu[:, 1], ::-1], c.voxel)
-        chunks_p.append(p)
-        chunks_c.append(rgb)
-        gathered += len(p)
-        if gathered > limit:
-            pts, cols = geometry.thin(np.concatenate(chunks_p), np.concatenate(chunks_c), c.voxel)
-            chunks_p, chunks_c, gathered = [pts], [cols], len(pts)
-            limit = max(4 * c.max_points, 2 * len(pts))
+        if v["split"] == "train":
+            p, rgb = start_points(src / "images" / f"{v['name']}.png", mm, c2w, K_depth, c)
+            chunks_p.append(p)
+            chunks_c.append(rgb)
+            gathered += len(p)
+            if gathered > limit:
+                pts, cols = geometry.thin(np.concatenate(chunks_p), np.concatenate(chunks_c), c.voxel)
+                chunks_p, chunks_c, gathered = [pts], [cols], len(pts)
+                limit = max(4 * c.max_points, 2 * len(pts))
+        progress(k, f" ({gathered} candidate start points)")
+    print("ingest: thinning the start points", flush=True)
     pts, cols = geometry.thin(np.concatenate(chunks_p), np.concatenate(chunks_c), c.voxel)
     if len(pts) > c.max_points:
         idx = np.random.default_rng(0).choice(len(pts), c.max_points, replace=False)
@@ -114,6 +142,7 @@ def run(ws: Workspace, cfg: Config) -> None:
 
     has_sky = empty_views > 0 and bool(cap.get("sky"))
     if has_sky:
+        print("ingest: baking the sky panorama", flush=True)
         faces = [cv2.imread(str(src / "sky" / f"{s['name']}.png")) for s in cap["sky"]]
         if any(f is None for f in faces):
             raise SystemExit("ingest: sky pictures missing from the capture")
