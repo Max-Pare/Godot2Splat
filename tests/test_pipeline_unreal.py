@@ -116,5 +116,7 @@ def test_scene_is_built_in_the_godot_project(built):
     for name in ('name="SplatPivot"', 'name="Splat"', 'name="SplatEnvironment"'):
         assert name in text
     assert manifest["source"]["engine"] == "unreal" and manifest["source_scene"] == ""
+    # The capture volume's position becomes the Godot origin.
+    assert np.allclose(manifest["source"]["origin"], fixture_room.VOLUME["position"], atol=0.01)
     assert "StaticBody3D" not in text   # collision is copied from Godot scenes only
     assert (out / "Room_sky.png").exists()

@@ -1,7 +1,8 @@
 """Stage 4: tidy the trained splat.
 
 1. Drop Gaussians that only add haze: near-transparent, oversized, needle-shaped, isolated.
-2. Drop Gaussians floating in space that the scene's depth maps show as empty.
+2. Drop Gaussians floating in space that the scene's depth maps show as empty, and
+   Gaussians no view shows (hidden behind the surface in every view).
 
 Later stages read the result through `output()`.
 """
@@ -77,11 +78,23 @@ def free_space_mask(means, depths, Ks, c2ws, margin: float, margin_rel: float,
     The nearest depth in a 3x3 window is used, so points on the edge of a foreground
     object are not judged against the background behind it.
     """
+    return free_and_hidden(means, depths, Ks, c2ws, margin, margin_rel, min_views, min_share)[0]
+
+
+def free_and_hidden(means, depths, Ks, c2ws, margin: float, margin_rel: float,
+                    min_views: int, min_share: float, hidden_margin: float = 0.1,
+                    hidden_margin_rel: float = 0.05):
+    """`free_space_mask`, and True for points that no view shows: outside every view,
+    or behind the surface (by more than the hidden margins) in every view that has
+    them in its picture. Training never sees these, so they keep whatever they drifted
+    to: they are the strays above ceilings, below floors and inside walls. A point in a
+    pixel without depth (sky, beyond the far clip) counts as shown."""
     import torch
 
     n = len(means)
     free = torch.zeros(n, device=means.device)
     seen = torch.zeros(n, device=means.device)
+    shown = torch.zeros(n, dtype=torch.bool, device=means.device)
     for depth, K, c2w in zip(depths, Ks, c2ws):
         h, w = depth.shape
         cam = (means - c2w[:3, 3]) @ c2w[:3, :3]
@@ -92,11 +105,13 @@ def free_space_mask(means, depths, Ks, c2ws, margin: float, margin_rel: float,
         near, _ = _neighbourhood(depth)
         idx = (v.clamp(0, h - 1), u.clamp(0, w - 1))
         d_here, d_near = depth[idx], near[idx]
+        shown |= ok & ((d_here <= 0) | (z < d_here + torch.maximum(
+            torch.full_like(z, hidden_margin), hidden_margin_rel * d_here)))
         ok &= (d_here > 0) & torch.isfinite(d_near)
         tol = torch.maximum(torch.full_like(z, margin), margin_rel * d_near)
         seen += (ok & (z < d_here + tol)).float()   # not hidden behind the surface
         free += (ok & (z < d_near - tol)).float()
-    return (free >= min_views) & (free >= min_share * seen.clamp_min(1))
+    return (free >= min_views) & (free >= min_share * seen.clamp_min(1)), ~shown
 
 
 def _depth_views(ws: Workspace, scene: dict, device):
@@ -138,11 +153,16 @@ def run(ws: Workspace, cfg: Config) -> None:
         device = device_mod.resolve(cfg.device)
         depths, Ks, c2ws = _depth_views(ws, scene, device)
         with torch.no_grad():
-            floating = free_space_mask(
+            floating, hidden = free_and_hidden(
                 torch.tensor(arr["means"], dtype=torch.float32, device=device), depths, Ks, c2ws,
-                c.margin, c.margin_rel, c.carve_min_views, c.carve_min_share).cpu().numpy()
+                c.margin, c.margin_rel, c.carve_min_views, c.carve_min_share,
+                c.hidden_margin, c.hidden_margin_rel)
+        floating, hidden = floating.cpu().numpy(), hidden.cpu().numpy()
         stats["in_free_space"] = int((floating & ~gone).sum())
         gone |= floating
+        if c.drop_hidden:
+            stats["hidden"] = int((hidden & ~gone).sum())
+            gone |= hidden
     arr = {k: v[~gone] for k, v in arr.items()}
 
     stats["after"] = len(arr["means"])
@@ -151,7 +171,8 @@ def run(ws: Workspace, cfg: Config) -> None:
     splat_io.write_ply(d / "scene.ply", **{k: arr[k] for k in train.PARAM_NAMES})
     (d / "clean.json").write_text(json.dumps(stats, indent=2))
     removed = ", ".join(f"{stats[k]} {k.replace('_', ' ')}" for k in
-                        ("transparent", "oversized", "needle", "isolated", "in_free_space") if k in stats)
+                        ("transparent", "oversized", "needle", "isolated", "in_free_space", "hidden")
+                        if k in stats)
     print(f"clean: {n0} Gaussians -> {stats['after']} (removed {removed})")
 
     from .. import evaluate

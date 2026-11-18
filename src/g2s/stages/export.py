@@ -66,6 +66,15 @@ def run(ws: Workspace, cfg: Config) -> None:
     # GDGS recentres imported data on its mean and the node has to be placed there.
     # Centring the file ourselves keeps that offset in one known place: the manifest.
     splat_io.transform_ply(src, out / f"{name}.ply", 1.0, center)
+    # Unreal levels sit anywhere in their world, often far from its origin, and
+    # nothing in Godot lines up with Unreal's coordinates. Put the scan's start point
+    # (the capture volume's position) at the Godot origin instead. Godot scans keep
+    # their coordinates: collision is copied from the source scene. Captures made
+    # before "start" was recorded fall back to the centre of the volume's box.
+    origin = np.zeros(3)
+    if c.engine == "unreal":
+        origin = np.array(cap.get("start") or cap.get("volume", {}).get("transform", [0] * 12)[9:12],
+                          dtype=np.float64)
 
     sky = ws.dir("ingest") / "sky.png"
     sky_res = ""
@@ -81,9 +90,10 @@ def run(ws: Workspace, cfg: Config) -> None:
         "version": 1,
         # Collision is copied from a Godot source scene only.
         "source_scene": c.scene if c.engine == "godot" else "",
-        "source": {"engine": c.engine, "project": c.project, "scene": c.scene},
+        "source": {"engine": c.engine, "project": c.project, "scene": c.scene,
+                   "origin": [float(v) for v in origin]},  # source position now at 0,0,0
         "splat": f"{out_res}{name}.ply",
-        "center": [float(v) for v in center],
+        "center": [float(v) for v in center - origin],
         "sky": sky_res,
         "background": mean_colour(src),
         "scene": f"{out_res}{name}_splat.tscn",

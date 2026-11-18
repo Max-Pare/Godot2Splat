@@ -57,3 +57,21 @@ def test_free_space_needs_agreeing_views_and_spares_edges():
     # Too few views to be sure.
     mask = clean.free_space_mask(pts, [depth] * 2, K.expand(2, 3, 3), c2ws[:2], min_views=3, **args)
     assert not mask.any()
+
+
+def test_hidden_points_are_the_ones_no_view_shows():
+    torch = pytest.importorskip("torch")
+    K = torch.tensor([[40.0, 0, 16], [0, 40.0, 12], [0, 0, 1]])
+    depth = torch.full((24, 32), 2.0)       # a wall 2 m ahead
+    depth[:, :4] = 0.0                      # no depth on the left edge: sky
+    c2ws = torch.eye(4)[None]
+    pts = torch.tensor([
+        [0.0, 0.0, 1.0],    # in front of the wall
+        [0.0, 0.0, 2.05],   # on the wall, within the hidden margin
+        [0.0, 0.0, 3.0],    # behind the wall
+        [0.0, 0.0, -1.0],   # behind the camera: outside every view
+        [-1.2, 0.0, 3.0],   # in the sky pixels: shown
+    ])
+    _, hidden = clean.free_and_hidden(pts, [depth], K[None], c2ws, margin=0.03, margin_rel=0.01,
+                                      min_views=1, min_share=0.8)
+    assert hidden.tolist() == [False, False, True, True, False]

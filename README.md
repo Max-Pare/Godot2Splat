@@ -172,7 +172,8 @@ How the Unreal scan differs from the Godot one:
 - World Partition levels: the region around the volume or `--origin` actor is loaded for the scan (`Fill Reach` plus 100 m around it).
 - During the scan the level viewports stop drawing every frame (a temporary Realtime override, removed afterwards; your own setting is kept): the pictures come from the scan's own cameras, so the GPU goes to them.
 - The sky picture shows Sky Atmosphere, fog, meshes whose material is marked Is Sky, and meshes larger than `Far Clip`.
-- Collision is not carried over: the generated Godot scene has no `Collision` node.
+- Collision is not carried over: the generated Godot scene's `Collision` node stays empty.
+- The volume's position (the `--origin` actor, for a volume g2s places itself) becomes the Godot origin, so the level is not left wherever it sits in Unreal's world. The manifest (`<level>_splat.json`) keeps the Unreal position as `source.origin`, in Godot axes and metres.
 
 ## Running on another machine
 
@@ -218,7 +219,7 @@ Effects that differ from view to view (SSR, SSAO, SSIL, glow, depth of field, au
 
 **Training.** gsplat with the MCMC strategy, as in Real2Virtu. Poses, intrinsics and depth are exact, so nothing about the cameras is learned. Pixels where the scene has no surface (sky) are kept out of the splat: there the render is laid over the picture itself, so staying clear is the best the splat can do; on surfaces it is laid over a random colour, so it has to be opaque.
 
-**Clean.** Removes near-transparent, oversized, needle-shaped and isolated Gaussians, and any that float in space the depth maps show as empty.
+**Clean.** Removes near-transparent, oversized, needle-shaped and isolated Gaussians, any that float in space the depth maps show as empty, and any that no view shows (behind the surface in every view: strays above ceilings, below floors and inside walls, which would otherwise stretch the splat's bounding box far past the level).
 
 **Export.** Writes `<scene>.ply` (centred on its mean position), `<scene>_sky.png` when the scan saw the sky, and builds `<scene>_splat.tscn`:
 

@@ -56,13 +56,31 @@ def depth_loss(rendered, target):
     return (r[valid] - target[valid]).abs().mean()
 
 
-def visible_mask(radii):
-    """[N] bool: Gaussians drawn in the rendered frame. `radii` is gsplat's
-    screen radius per camera and Gaussian, [C,N] or [C,N,2]; 0 means not drawn."""
-    drawn = radii > 0
-    if drawn.dim() == 3:
-        drawn = drawn.all(dim=-1)
-    return drawn.any(dim=0)
+def regularise(params, opacity_reg: float, scale_reg: float) -> None:
+    """Add the MCMC opacity and scale regularisers to the gradients, for the Gaussians
+    that drew something in this frame only: those whose opacity got a gradient from
+    the picture. Call after backward.
+
+    The regulariser alone is a tiny, steady push, and Adam turns a lone push into a
+    full-size step. A Gaussian in the camera's view but behind a wall gets nothing
+    else, so in a level of many rooms (each frame has most of the level in view,
+    hidden) opacity fell all through training: 75% of the Gaussians nearly
+    transparent after 20k steps on the corridor, all of them after 80k (NOTES.md).
+    Before that, every Gaussian in the view was regularised, and before that all.
+    """
+    import torch
+
+    g_op, g_sc = params["opacities"].grad, params["scales"].grad
+    if g_op is None or g_sc is None:
+        return
+    with torch.no_grad():
+        drew = g_op != 0
+        n = int(drew.sum())
+        if n == 0:
+            return
+        s = torch.sigmoid(params["opacities"][drew])
+        g_op[drew] += opacity_reg * s * (1 - s) / n
+        g_sc[drew] += scale_reg * torch.exp(params["scales"][drew]) / (n * params["scales"].shape[1])
 
 
 def _ssim(a, b):
@@ -395,16 +413,10 @@ def run(ws: Workspace, cfg: Config) -> None:
         loss = loss + c.alpha_weight * alpha_loss(alpha[..., 0], solid, empty)
         d_err = depth_loss(out[..., 3], depth)
         loss = loss + c.depth_weight * d_err
-        # Regularise only the Gaussians this frame sees. Over all of them, one that is
-        # out of view gets nothing but the regulariser, and Adam turns that into a
-        # full-size step: in a large scene, where each frame sees a small part, opacity
-        # then falls to zero between sightings and the Gaussians die and get
-        # relocated in bulk (opacity collapse).
-        seen = visible_mask(info["radii"])
-        if bool(seen.any()):
-            loss = loss + c.opacity_reg * torch.sigmoid(params["opacities"][seen]).mean()
-            loss = loss + c.scale_reg * torch.exp(params["scales"][seen]).mean()
         loss.backward()
+        # The opacity regulariser frees Gaussians for MCMC to relocate. Once relocation
+        # stops nothing reuses them, and it would only fade the splat away.
+        regularise(params, c.opacity_reg if step < strategy.refine_stop_iter else 0.0, c.scale_reg)
 
         for opt in optimizers.values():
             opt.step()

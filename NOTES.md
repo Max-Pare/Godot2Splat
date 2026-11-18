@@ -5,7 +5,40 @@ to use the tool; this file records the state of the work. Last updated 2026-11-1
 
 ## Open problems
 
-### Training collapses on large Unreal levels (unsolved)
+### Training collapses on large Unreal levels (cause found, fix to confirm on the 5090)
+
+**Cause: the opacity regulariser.** It is a tiny, steady push down on opacity, and Adam
+turns a push with nothing against it into a full-size step. Before the fix, every Gaussian
+in the camera's view got it, also those hidden behind walls, which the picture gives no
+gradient. In a level of many rooms each frame has most of the level in view, hidden, so
+opacity fell all through training. MCMC relocation hid it while it ran (it moves the dead
+ones), then the share jumped once relocation stops at 83% of the steps. 80k steps leave
+14k steps of fading after that: the collapse.
+
+5090 rerun, default 20k steps (2,106 views): faint share 11% at step 500, 57% by 13k,
+jump to 66% at 17k (relocation stopped at 16.6k), 75% at the end. 18.50 dB held out
+(19.00 after clean), cleanup removed 898,765 as transparent.
+
+A/B on this machine, old corridor capture (720 views, 50% picture size), share of
+Gaussians under 0.02 opacity:
+
+| Run (steps) | step 4k | step 8k | step 9k | end | Held-out PSNR (train) |
+|---|---|---|---|---|---|
+| before the fix (10k) | 11% | 20% | 28% | 28%+ | 20.00 dB |
+| MCMC position noise / 10 (10k) | 11% | 16% | 21% | | 19.77 dB |
+| no opacity regulariser (10k) | 3% | 6% | 7% | 8% | 20.02 dB |
+| regulariser only on Gaussians that drew something (10k) | 7% | 15% | 20% | 25% | 19.84 dB |
+| that, and no regulariser after relocation stops (20k): **the fix** | 10% at 5k | 23% at 10k | 17% at 15k | 21% | 19.84 dB |
+
+The fix (`train.regularise`): the regulariser goes only to Gaussians whose opacity got a
+gradient from the picture, and stops when relocation stops. Held-out PSNR on this capture
+stays near 20 dB whatever the run; it is limited by the capture (720 Box views, held-out
+views looking at blown-out sky), not by the fading.
+
+Still to confirm: the same 5090 run with the fix. Expect a faint share that stops climbing
+and cleanup removing far fewer than 898k.
+
+Earlier investigation, kept for reference:
 
 Run on the RTX 5090 machine: corridor level, Fill placement, 351 positions (2,106 training
 views at 800 px), `--steps 80000`, default cap 1.2M.
@@ -49,6 +82,23 @@ Next steps:
    areas; views that see mostly unlit, pure black areas.
 4. Possible guard: stop or warn when the share of Gaussians under 0.02 opacity keeps rising,
    and keep the best checkpoint by held-out score.
+
+### Strays outside the level (fixed)
+
+Seen in Godot on the 5090 corridor splat: the splat node's bounding box many times larger than
+the level, and collision generated with the gdgs panel coming out as one big block (gdgs
+sizes its voxels from that box: longest side / 128). Cause: Gaussians no capture view shows,
+above ceilings, below floors and inside walls. Training never sees them, so they keep
+whatever they drifted to. On the old corridor run 20% of the cleaned splat was such strays;
+40 of them more than 10 m out stretched the box to 70 x 44 x 105 m around a level 4 m tall.
+
+Clean now drops them (`hidden`, `CleanCfg.drop_hidden`): behind the surface by more than
+10 cm / 5% in every view that has them in its picture. 20k-step corridor run: 98,975
+removed, held-out PSNR 19.96 -> 20.40 dB, box 34.5 x 14.2 x 71.1 -> 33.2 x 4.4 x 62.3 m.
+
+Also from that look: the splat sat ~90 m from the Godot origin, where the level is in
+Unreal's world. Unreal exports now put the capture volume's position (the start actor) at
+the Godot origin; the manifest keeps the Unreal position as `source.origin`.
 
 ### Corridor quality even without collapse
 

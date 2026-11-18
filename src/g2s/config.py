@@ -70,6 +70,12 @@ class CleanCfg:
     margin_rel: float = 0.01          # ... or this share of the depth, whichever is larger
     carve_min_views: int = 2
     carve_min_share: float = 0.8      # share of the views seeing the Gaussian that must agree
+    # Drop Gaussians no view shows (behind the surface in every view that has them in
+    # its picture): strays above ceilings and inside walls, which also blow up the
+    # splat's bounding box. Looser margins than carving: hidden by more than this.
+    drop_hidden: bool = True
+    hidden_margin: float = 0.1
+    hidden_margin_rel: float = 0.05
 
 
 @dataclass

@@ -1,19 +1,22 @@
-"""Training helpers copied from Real2Virtu: visibility mask and the image loss."""
+"""Training helpers: the regulariser, and the image loss copied from Real2Virtu."""
 import pytest
 import torch
 
-from g2s.stages.train import visible_mask
+from g2s.stages.train import regularise
 
 
-def test_visible_mask_needs_both_radii_and_any_camera():
-    # [C=2, N=3, 2]: Gaussian 0 drawn by camera 0, 1 by none (one radius 0), 2 by camera 1.
-    radii = torch.tensor([[[3, 2], [4, 0], [0, 0]],
-                          [[0, 0], [0, 0], [1, 1]]])
-    assert visible_mask(radii).tolist() == [True, False, True]
-
-
-def test_visible_mask_accepts_one_radius_per_gaussian():
-    assert visible_mask(torch.tensor([[0, 5, 0]])).tolist() == [False, True, False]
+def test_regulariser_reaches_only_gaussians_that_drew_something():
+    # Gaussian 1 is in view but hidden: the picture gave it no gradient, so the
+    # regulariser must not either (alone, Adam would turn it into a full step).
+    params = {"opacities": torch.zeros(3, requires_grad=True),
+              "scales": torch.zeros(3, 3, requires_grad=True)}
+    params["opacities"].grad = torch.tensor([0.5, 0.0, -0.2])
+    params["scales"].grad = torch.zeros(3, 3)
+    regularise(params, opacity_reg=0.01, scale_reg=0.01)
+    g_op, g_sc = params["opacities"].grad, params["scales"].grad
+    # sigmoid(0) = 0.5: d/dx of 0.01 * mean over the 2 drawing Gaussians = 0.01 * 0.25 / 2
+    assert torch.allclose(g_op, torch.tensor([0.5 + 0.00125, 0.0, -0.2 + 0.00125]))
+    assert g_sc[1].abs().sum() == 0 and torch.allclose(g_sc[0], torch.full((3,), 0.01 / 6))
 
 
 def test_loss_without_convolutions_matches_the_convolution_one():

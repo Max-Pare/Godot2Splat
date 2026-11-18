@@ -945,6 +945,11 @@ bool FG2SCaptureJob::WriteManifest()
 	M->SetNumberField(TEXT("far"), V->FarClip / 100.0);
 	M->SetNumberField(TEXT("positions"), Positions.Num());
 	M->SetObjectField(TEXT("volume"), VolumeJson);
+	// The volume actor's position (the start actor's, for a volume placed by
+	// -G2SOrigin): export puts it at the Godot origin. Under Fill the box above is
+	// the reached space, centred elsewhere.
+	const FVector Start = G2SPlanner::ToGodotDirection(V->GetActorLocation()) / 100.0;
+	M->SetField(TEXT("start"), Numbers({Start.X, Start.Y, Start.Z}));
 	M->SetObjectField(TEXT("training"), Training);
 	M->SetArrayField(TEXT("notes"), NoteValues);
 	M->SetArrayField(TEXT("views"), ViewList(Shots, true));
