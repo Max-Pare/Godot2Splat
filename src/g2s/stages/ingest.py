@@ -73,7 +73,11 @@ def run(ws: Workspace, cfg: Config) -> None:
 
     d = ws.reset("ingest")
     (d / "depth").mkdir()
-    pts, cols = np.zeros((0, 3)), np.zeros((0, 3), dtype=np.uint8)
+    # Start points gather per view and are thinned together whenever they have doubled
+    # since the last thinning: thinning (or joining) them after every view made ingest
+    # grow with the square of the views (2,000 views took most of half an hour).
+    chunks_p, chunks_c = [np.zeros((0, 3))], [np.zeros((0, 3), dtype=np.uint8)]
+    gathered, limit = 0, 4 * c.max_points
     empty_views = 0
     for v, c2w, mm in zip(views, c2ws, depths_mm):
         counts = np.rint(mm / unit_mm).astype(np.uint16)
@@ -90,10 +94,14 @@ def run(ws: Workspace, cfg: Config) -> None:
         sparse[::c.point_stride, ::c.point_stride] = mm[::c.point_stride, ::c.point_stride]
         p, vu = geometry.backproject(sparse / 1000.0, K_depth, c2w)
         p, rgb = geometry.thin(p, small[vu[:, 0], vu[:, 1], ::-1], c.voxel)
-        pts, cols = np.concatenate([pts, p]), np.concatenate([cols, rgb])
-        if len(pts) > 4 * c.max_points:
-            pts, cols = geometry.thin(pts, cols, c.voxel)
-    pts, cols = geometry.thin(pts, cols, c.voxel)
+        chunks_p.append(p)
+        chunks_c.append(rgb)
+        gathered += len(p)
+        if gathered > limit:
+            pts, cols = geometry.thin(np.concatenate(chunks_p), np.concatenate(chunks_c), c.voxel)
+            chunks_p, chunks_c, gathered = [pts], [cols], len(pts)
+            limit = max(4 * c.max_points, 2 * len(pts))
+    pts, cols = geometry.thin(np.concatenate(chunks_p), np.concatenate(chunks_c), c.voxel)
     if len(pts) > c.max_points:
         idx = np.random.default_rng(0).choice(len(pts), c.max_points, replace=False)
         pts, cols = pts[idx], cols[idx]

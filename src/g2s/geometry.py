@@ -58,10 +58,14 @@ def backproject(depth_m: np.ndarray, K: np.ndarray, c2w: np.ndarray) -> tuple[np
 
 
 def thin(points: np.ndarray, colors: np.ndarray, voxel: float) -> tuple[np.ndarray, np.ndarray]:
-    """Keep one point per voxel."""
+    """Keep one point per voxel: the first one, in voxel order (x, then y, then z)."""
     if len(points) == 0:
         return points, colors
-    _, idx = np.unique(np.floor(points / voxel).astype(np.int64), axis=0, return_index=True)
+    # Each voxel's three indices packed into one int64 (21 bits each, +-20 km at 2 cm):
+    # a 1-D unique is many times faster than np.unique(axis=0), same order and result.
+    cell = np.clip(np.floor(points / voxel).astype(np.int64) + (1 << 20), 0, (1 << 21) - 1)
+    keys = (cell[:, 0] << 42) | (cell[:, 1] << 21) | cell[:, 2]
+    _, idx = np.unique(keys, return_index=True)
     return points[idx], colors[idx]
 
 
