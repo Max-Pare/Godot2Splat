@@ -39,6 +39,8 @@ Conclusions so far:
 Next steps:
 1. On the 5090, rerun the same capture with default steps (no `--steps`). Watch the train log
    for the step where the loss starts climbing, and whether cleanup still removes nearly everything.
+   Every progress line now shows the share of "faint" Gaussians (opacity under 0.02, what
+   cleanup drops). Note the step where that share starts rising.
 2. Look at the 5090 capture pictures (`<project>/.g2s/DerelictCorridor/capture/images`). This
    capture is different from the one tested here (Fill, another project copy, start actor
    `SplatStart`). Check for black, white or blown-out frames and views inside geometry.

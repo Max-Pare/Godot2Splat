@@ -418,10 +418,14 @@ def run(ws: Workspace, cfg: Config) -> None:
             now = time.perf_counter()
             rate = (500 if step else 1) / max(now - lap, 1e-9)
             lap = now
+            # Share of Gaussians cleanup would drop as haze. A share that keeps rising
+            # is an opacity collapse in the making (see NOTES.md).
+            with torch.no_grad():
+                faint = float((torch.sigmoid(params["opacities"]) < cfg.clean.min_opacity).float().mean())
             # flush: progress must show up while training runs, also when piped to a file.
             print(f"train: step {step}/{steps} loss {loss.item():.4f} "
                   f"depth err {d_err.item() * 100:.1f} cm "
-                  f"gaussians {len(params['means'])} peak VRAM {vram:.1f} GB "
+                  f"gaussians {len(params['means'])} ({faint:.0%} faint) peak VRAM {vram:.1f} GB "
                   f"{rate:.1f} steps/s, {(now - started) / 60:.1f} min", flush=True)
 
     d = ws.reset("train")
