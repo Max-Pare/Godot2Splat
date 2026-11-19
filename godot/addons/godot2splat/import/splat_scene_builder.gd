@@ -11,8 +11,9 @@ extends RefCounted
 ##     Player (player.tscn)             first-person camera; made on the first build only
 ##
 ## Everything else under the root (SplatObject highlight volumes, lights, your own
-## nodes, the Player) is yours: a rebuild keeps it. Changes to the other nodes
-## above are replaced.
+## nodes, the Player) is yours: a rebuild keeps it. So is what the gdgs panels add
+## to Splat (CollisionBody, CollisionSeed, baked lighting, the panels' settings):
+## a rebuild moves it to the new Splat. Changes to the other nodes above are replaced.
 ##
 ## Why two half turns: the gdgs importer centres the Gaussians on their mean, so
 ## the node has to sit there, and GaussianSplatNode turns itself by half a turn
@@ -103,25 +104,60 @@ static func _keep_added_nodes(scene_path: String, root: Node) -> int:
 	if packed == null:
 		return 0
 	var old := packed.instantiate()
-	var count := 0
+	var count := _keep_splat_additions(old, root)
 	for child in old.get_children():
 		if child.name in GENERATED:
 			continue
-		# Nodes saved in the scene itself; the insides of instanced scenes stay theirs.
-		var owned: Array[Node] = [child]
-		for node in child.find_children("*", "", true, false):
-			if node.owner == old:
-				owned.append(node)
-		# Owners are set again below; left on the old root, moving warns of an inconsistent owner.
-		for node in owned:
-			node.owner = null
-		old.remove_child(child)
-		root.add_child(child)
-		for node in owned:
-			node.owner = root
+		_move_owned(child, old, root, root)
 		count += 1
 	old.free()
 	return count
+
+
+## What the gdgs panels add to the Splat node: CollisionBody and CollisionSeed
+## children (and any other child you gave it), the baked lighting and relight
+## settings, and the panels' settings, kept as metadata. Children keep their place
+## in the world when the new splat is centred elsewhere. Returns how many children
+## were kept. gdgs ignores baked lighting that does not match the splat's count.
+static func _keep_splat_additions(old: Node, root: Node) -> int:
+	var old_splat := old.get_node_or_null("SplatPivot/Splat") as Node3D
+	var new_splat := root.get_node_or_null("SplatPivot/Splat") as Node3D
+	if old_splat == null or new_splat == null:
+		return 0
+	var script: Script = old_splat.get_script()
+	if script != null:
+		for p in script.get_script_property_list():
+			if p["usage"] & PROPERTY_USAGE_STORAGE and p["name"] != "gaussian":
+				new_splat.set(p["name"], old_splat.get(p["name"]))
+	for key in old_splat.get_meta_list():
+		new_splat.set_meta(key, old_splat.get_meta(key))
+	var old_xf := _transform_in_scene(old_splat, old)
+	var new_xf := _transform_in_scene(new_splat, root)
+	var count := 0
+	for child in old_splat.get_children():
+		if child.owner != old:
+			continue   # made by the node itself at run time, not saved
+		if child is Node3D:
+			(child as Node3D).transform = new_xf.affine_inverse() * old_xf * (child as Node3D).transform
+		_move_owned(child, old, new_splat, root)
+		count += 1
+	return count
+
+
+## Moves `child` under `parent`, with the nodes `old_root` saved below it (the
+## insides of instanced scenes stay theirs) now owned by `new_root`.
+static func _move_owned(child: Node, old_root: Node, parent: Node, new_root: Node) -> void:
+	var owned: Array[Node] = [child]
+	for node in child.find_children("*", "", true, false):
+		if node.owner == old_root:
+			owned.append(node)
+	# Owners are set again below; left on the old root, moving warns of an inconsistent owner.
+	for node in owned:
+		node.owner = null
+	child.get_parent().remove_child(child)
+	parent.add_child(child)
+	for node in owned:
+		node.owner = new_root
 
 
 ## The first-person player, with its camera at the scan's start point (open air by

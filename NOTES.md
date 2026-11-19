@@ -183,6 +183,9 @@ were added for this. The 5090 run used them (351 positions) but collapsed, so th
 - First-person Player (from Real2Virtu) in the generated scene, camera at the start point,
   flying when there is no collision. Checked headless (build, rebuild keeps it, runs without
   script errors); not yet walked by hand. The pipeline test assertions for it have not run.
+- Rebuilds keep what the gdgs panels add to `Splat` (CollisionBody, CollisionSeed, lighting,
+  relight and panel settings), in the same place in the world when the splat's centre moves.
+  Checked headless with a hand-made CollisionBody and seed; not yet with a real gdgs collision.
 - 5090 setup: `scripts/setup_windows.ps1`, `scripts/pack.ps1`, README "Running on another machine".
 
 ## Needs testing
