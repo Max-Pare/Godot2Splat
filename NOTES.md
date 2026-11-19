@@ -180,6 +180,9 @@ were added for this. The 5090 run used them (351 positions) but collapsed, so th
 - Godot `--import` crash on Windows on the first import that also enables the addons: g2s retries once.
 - The viewports stop drawing during an Unreal scan (temporary Realtime override). The room capture ran fine with it.
 - SplatObject (from Real2Virtu): highlight, motion, collision follow. Done in its own session.
+- First-person Player (from Real2Virtu) in the generated scene, camera at the start point,
+  flying when there is no collision. Checked headless (build, rebuild keeps it, runs without
+  script errors); not yet walked by hand. The pipeline test assertions for it have not run.
 - 5090 setup: `scripts/setup_windows.ps1`, `scripts/pack.ps1`, README "Running on another machine".
 
 ## Needs testing
