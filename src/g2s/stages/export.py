@@ -71,10 +71,9 @@ def run(ws: Workspace, cfg: Config) -> None:
     # (the capture volume's position) at the Godot origin instead. Godot scans keep
     # their coordinates: collision is copied from the source scene. Captures made
     # before "start" was recorded fall back to the centre of the volume's box.
-    origin = np.zeros(3)
-    if c.engine == "unreal":
-        origin = np.array(cap.get("start") or cap.get("volume", {}).get("transform", [0] * 12)[9:12],
-                          dtype=np.float64)
+    start = np.array(cap.get("start") or cap.get("volume", {}).get("transform", [0] * 12)[9:12],
+                     dtype=np.float64)
+    origin = start if c.engine == "unreal" else np.zeros(3)
 
     sky = ws.dir("ingest") / "sky.png"
     sky_res = ""
@@ -94,6 +93,8 @@ def run(ws: Workspace, cfg: Config) -> None:
                    "origin": [float(v) for v in origin]},  # source position now at 0,0,0
         "splat": f"{out_res}{name}.ply",
         "center": [float(v) for v in center - origin],
+        # Where the scan started, in open air: the player's camera starts here.
+        "spawn": [float(v) for v in start - origin],
         "sky": sky_res,
         "background": mean_colour(src),
         "scene": f"{out_res}{name}_splat.tscn",

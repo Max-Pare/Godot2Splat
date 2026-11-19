@@ -98,8 +98,11 @@ def test_scene_is_built_in_the_project(built):
     out = project / "splats" / "room"
     manifest = json.loads((out / "room_splat.json").read_text())
     text = (out / "room_splat.tscn").read_text()
-    for name in ('name="SplatPivot"', 'name="Splat"', 'name="SplatEnvironment"', 'name="Collision"'):
+    for name in ('name="SplatPivot"', 'name="Splat"', 'name="SplatEnvironment"', 'name="Collision"',
+                 'name="Player"'):
         assert name in text
+    assert "start_flying = true" not in text   # the copied collision is walkable
+    assert len(manifest["spawn"]) == 3
     assert text.count('type="StaticBody3D"') == sum(1 for *_, body in fixture_room.SHELL + fixture_room.PROP_BOXES if body)
     assert "res://room.tscn" not in text      # the splat scene stands on its own
     assert (out / "room_sky.png").exists() and manifest["sky"] == "res://splats/room/room_sky.png"
@@ -161,3 +164,4 @@ def test_splat_object_highlights_and_survives_a_rebuild(built):
     assert '[node name="BallHighlight" type="Node3D" parent="."' in text
     assert "res://addons/godot2splat/objects/splat_object.gd" in text
     assert text.count('name="SplatPivot"') == 1      # rebuilt, not doubled
+    assert text.count('[node name="Player"') == 1    # kept, not doubled

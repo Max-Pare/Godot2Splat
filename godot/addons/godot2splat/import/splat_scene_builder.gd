@@ -8,9 +8,11 @@ extends RefCounted
 ##       Splat (GaussianSplatNode)      half a turn about Z
 ##     SplatEnvironment (WorldEnvironment)
 ##     Collision (Node3D)               copies of the source scene's static bodies
+##     Player (player.tscn)             first-person camera; made on the first build only
 ##
 ## Everything else under the root (SplatObject highlight volumes, lights, your own
-## nodes) is yours: a rebuild keeps it. Changes to the nodes above are replaced.
+## nodes, the Player) is yours: a rebuild keeps it. Changes to the other nodes
+## above are replaced.
 ##
 ## Why two half turns: the gdgs importer centres the Gaussians on their mean, so
 ## the node has to sit there, and GaussianSplatNode turns itself by half a turn
@@ -24,6 +26,7 @@ extends RefCounted
 const SPLAT_NODE := "res://addons/gdgs/runtime/nodes/gaussian_splat_node.gd"
 const COMPOSITOR_EFFECT := "res://addons/gdgs/runtime/compositor/gaussian_compositor_effect.gd"
 const SKY_SHADER := "res://addons/godot2splat/import/panorama_sky.gdshader"
+const PLAYER_SCENE := "res://addons/godot2splat/player/player.tscn"
 ## Children of the root that the builder makes; every other child is yours and is kept.
 const GENERATED: Array[StringName] = [&"SplatPivot", &"SplatEnvironment", &"Collision"]
 const HALF_TURN := Basis(Vector3(-1, 0, 0), Vector3(0, -1, 0), Vector3(0, 0, 1))
@@ -74,6 +77,8 @@ static func build(manifest_path: String) -> Dictionary:
 	for node in root.find_children("*", "", true, false):
 		node.owner = root
 	var kept := _keep_added_nodes(scene_path, root)
+	if root.get_node_or_null("Player") == null:
+		_add_player(root, m, bodies == 0)
 	var packed := PackedScene.new()
 	var error := packed.pack(root)
 	if error == OK:
@@ -107,6 +112,9 @@ static func _keep_added_nodes(scene_path: String, root: Node) -> int:
 		for node in child.find_children("*", "", true, false):
 			if node.owner == old:
 				owned.append(node)
+		# Owners are set again below; left on the old root, moving warns of an inconsistent owner.
+		for node in owned:
+			node.owner = null
 		old.remove_child(child)
 		root.add_child(child)
 		for node in owned:
@@ -114,6 +122,21 @@ static func _keep_added_nodes(scene_path: String, root: Node) -> int:
 		count += 1
 	old.free()
 	return count
+
+
+## The first-person player, with its camera at the scan's start point (open air by
+## construction). Made on the first build only; after that it is yours, like any
+## node you add, so moving it or changing its settings survives a rebuild.
+## Without collision there is nothing to walk on, so it starts flying.
+static func _add_player(root: Node3D, m: Dictionary, flying: bool) -> void:
+	var player: Node3D = load(PLAYER_SCENE).instantiate()
+	player.name = "Player"
+	var spawn: Array = m.get("spawn", [0.0, 0.0, 0.0])
+	var eye: float = (player.get_node("Camera") as Node3D).position.y
+	player.position = Vector3(spawn[0], spawn[1] - eye, spawn[2])
+	player.set("start_flying", flying)
+	root.add_child(player)
+	player.owner = root
 
 
 static func _environment(m: Dictionary) -> Environment:

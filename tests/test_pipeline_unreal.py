@@ -120,3 +120,6 @@ def test_scene_is_built_in_the_godot_project(built):
     assert np.allclose(manifest["source"]["origin"], fixture_room.VOLUME["position"], atol=0.01)
     assert "StaticBody3D" not in text   # collision is copied from Godot scenes only
     assert (out / "Room_sky.png").exists()
+    # The player starts at the origin (the start point), flying: there is no collision.
+    assert 'name="Player"' in text and "start_flying = true" in text
+    assert np.allclose(manifest["spawn"], 0.0, atol=1e-6)

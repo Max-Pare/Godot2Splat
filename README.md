@@ -126,7 +126,7 @@ Ported from Real2Virtu. A part of the splat can glow when the player comes near,
 
 For your own behaviour, connect the `player_entered` and `player_exited` signals. You can also move the node from a script or an `AnimationPlayer` with `Motion` set to none: the Gaussians follow the node. Scripts can also set `highlight_strength` and `opacity`.
 
-- Rebuilding the splat scene (`g2s build`, the editor button) keeps every node you added under its root, SplatObjects included. Only `SplatPivot`, `SplatEnvironment` and `Collision` are made anew, so changes to those are lost.
+- Rebuilding the splat scene (`g2s build`, the editor button) keeps every node you added under its root, SplatObjects and the `Player` included. Only `SplatPivot`, `SplatEnvironment` and `Collision` are made anew, so changes to those are lost.
 - The shape takes whatever is inside it, including bits of floor or wall: an ellipsoid fits round things better than a box. Where shapes overlap, the first node in the tree wins.
 - The scan has nothing behind an object, so moving or fading it shows a gap.
 - At most 32 per scene. Needs the Compute renderer (the default); the Raster renderer ignores them with a warning.
@@ -229,7 +229,15 @@ Effects that differ from view to view (SSR, SSAO, SSIL, glow, depth of field, au
     Splat (GaussianSplatNode)          half a turn about Z
   SplatEnvironment (WorldEnvironment)  linear tonemapping, baked sky, the gdgs compositor effect
   Collision (Node3D)                   copies of the source scene's StaticBody3D nodes and shapes
+  Player (CharacterBody3D)             first-person camera at the scan's start point
 ```
+
+Run the scene (F6) to look around. The `Player` (ported from Real2Virtu, `addons/godot2splat/player/`):
+- Walk: WASD or arrows, mouse look, Space jumps, gravity and collision on.
+- Fly (F toggles): WASD moves where you look, Space/E up, Q/Ctrl down, through walls.
+- Shift moves faster. R returns to the start. Mouse wheel zooms, middle click resets it. Esc frees the mouse, a click captures it again.
+
+Its camera starts where the scan started, which is open air. Scans without collision (Unreal levels) start it flying, since there is nothing to stand on; after making collision with the gdgs panel, press F to walk, or untick `Start Flying` on the `Player`. It is made on the first build only: after that it is yours like any node you add, so moving it or replacing it survives a rebuild. To start somewhere else, move it in the editor.
 
 The two half turns cancel. They are there because `GaussianSplatNode` turns itself upside down when it enters the tree unrotated (it assumes a Y-down file), and leaves a node that is already rotated alone.
 
