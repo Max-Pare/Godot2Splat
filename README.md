@@ -236,6 +236,14 @@ Run the scene (F6) to look around. The `Player` (ported from Real2Virtu, `addons
 - Walk: WASD or arrows, mouse look, Space jumps, gravity and collision on.
 - Fly (F toggles): WASD moves where you look, Space/E up, Q/Ctrl down, through walls.
 - Shift moves faster. R returns to the start. Mouse wheel zooms, middle click resets it. Esc frees the mouse, a click captures it again.
+- F3 shows or hides the performance overlay (`PerfMonitor`, shown at start; untick `Show On Start` on it to start hidden). It updates four times a second and shows:
+  - frame time (average and worst over the last second) and frames per second;
+  - CPU render time and physics time;
+  - GPU time of the view, the splat included;
+  - VRAM that Godot allocated, the splat's buffers included, but not what other programs use;
+  - Godot's own RAM (debug builds only) and the whole system's RAM use;
+  - the splat count, draw calls, resolution, vsync, the GPU's name and the player's position;
+  - a graph of the frame time and GPU time, with lines at 60 and 30 frames per second.
 
 Its camera starts where the scan started, which is open air. Scans without collision (Unreal levels) start it flying, since there is nothing to stand on; after making collision, press F to walk, or untick `Start Flying` on the `Player`. To make collision, select `SplatPivot/Splat` and use the **GDGS Collision** section at the top of the Inspector. For a level, set Scene mode to `Interior`, add the seed with **Add / Select** and move it into open space, then click **Generate Collision** and save the scene. It is made on the first build only: after that it is yours like any node you add, so moving it or replacing it survives a rebuild. To start somewhere else, move it in the editor.
 

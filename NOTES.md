@@ -186,6 +186,10 @@ were added for this. The 5090 run used them (351 positions) but collapsed, so th
 - Rebuilds keep what the gdgs panels add to `Splat` (CollisionBody, CollisionSeed, lighting,
   relight and panel settings), in the same place in the world when the splat's centre moves.
   Checked headless with a hand-made CollisionBody and seed; not yet with a real gdgs collision.
+- Performance overlay on the Player (F3). Checked in an off-screen window on the 5060 Laptop with the
+  4.1M-Gaussian corridor: GPU 7.8 ms (0.1 ms with 50 Gaussians, so the splat is counted), VRAM
+  3.41 GiB of which buffers 2.24 GiB (gdgs's), 60 fps under vsync. F3 toggling checked headless.
+  Godot's process time includes the vsync wait, so the CPU line shows render and physics only.
 - 5090 setup: `scripts/setup_windows.ps1`, `scripts/pack.ps1`, README "Running on another machine".
 
 ## Needs testing
