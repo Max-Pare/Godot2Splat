@@ -798,7 +798,8 @@ bool FG2SCaptureJob::TickPlan()
 	// cell is reached when an accepted position sees it. Box: only cells inside the
 	// box. Fill: any cell within Fill Reach, except that cells which see mostly sky
 	// (outdoors) are not taken and the walk does not go on from them. Both: when the
-	// level has GaussianVoxelLimit volumes, only cells inside one of them.
+	// level has GaussianVoxelLimit volumes, only cells inside one of them; and a cell
+	// too close to a surface has its finer points tried instead (Tight Spots).
 	ASplatCaptureVolume* V = Volume.Get();
 	const float Spacing = V->CameraSpacing;
 	const bool bFill = V->Placement == ESplatCapturePlacement::Fill;
@@ -808,6 +809,12 @@ bool FG2SCaptureJob::TickPlan()
 			: G2SPlanner::FGrid::Box(BoxXf, BoxExtent, Spacing);
 		Queue = V->GetStartPoints();
 		Seeds = Queue.Num();
+		QueueParent.Init(INDEX_NONE, Seeds);
+		QueueFine.Init(0, Seeds);
+		FineTried = 0;
+		FineTaken = 0;
+		FineOpen = 0;
+		CachedParent = INDEX_NONE;
 		Next = 0;
 		if (!FindLimits())
 		{
@@ -828,26 +835,42 @@ bool FG2SCaptureJob::TickPlan()
 	const double SliceEnd = FPlatformTime::Seconds() + 0.05;
 	while (Next < Queue.Num() && FPlatformTime::Seconds() < SliceEnd)
 	{
-		const FVector At = Queue[Next++];
+		const int32 Index = Next++;
+		const FVector At = Queue[Index];
 		const G2SPlanner::FProbe P = Probe(At);
 		const float Room = G2SPlanner::Clearance(P);
-		if (Room < V->MinClearance)
+		// Finer points stand in gaps: half the clearance, or most gaps would have no
+		// room for them (a 0.85 m gap leaves 25 cm at 30 cm from both sides).
+		if (Room < V->MinClearance * (QueueFine[Index] ? 0.5f : 1.f))
 		{
-			if (Next <= Seeds)
+			if (Index < Seeds)
 			{
 				Fail(FString::Printf(TEXT("start point %s is %.0f cm from a surface (Min Clearance is %.0f cm). "
 					"Move the Splat Capture Volume or its extra start point into open air."), *At.ToCompactString(), Room, V->MinClearance));
 				return false;
 			}
 			++TooClose;
+			if (V->bTightSpots && !QueueFine[Index])
+			{
+				TryTightSpot(At, QueueParent[Index], bFill);
+			}
 			continue;
 		}
-		if (bFill && Next > Seeds && G2SPlanner::SkyShare(P) > V->OutdoorSkyShare)
+		if (QueueFine[Index] && G2SPlanner::GapWidth(P) >= Spacing + 2.f * V->MinClearance)
+		{
+			// Next to one surface only, such as a plain wall: the grid's own points see it.
+			// A finer point is for gaps the grid can step over.
+			++FineOpen;
+			continue;
+		}
+		if (bFill && Index >= Seeds && G2SPlanner::SkyShare(P) > V->OutdoorSkyShare)
 		{
 			++Outdoors;
 			continue;
 		}
 		Positions.Add(At);
+		const int32 Me = Positions.Num() - 1;
+		FineTaken += QueueFine[Index];
 		const FIntVector Here = Grid.CellOf(At);
 		const int32 R = FMath::CeilToInt(2.5f * Spacing / FMath::Min3(Grid.Step.X, Grid.Step.Y, Grid.Step.Z)) + 1;
 		for (int32 DX = -R; DX <= R; ++DX)
@@ -876,6 +899,8 @@ bool FG2SCaptureJob::TickPlan()
 						continue;
 					}
 					Queue.Add(To);
+					QueueParent.Add(Me);
+					QueueFine.Add(0);
 				}
 			}
 		}
@@ -905,6 +930,12 @@ bool FG2SCaptureJob::TickPlan()
 	if (Limits.Num() > 0)
 	{
 		UE_LOG(LogG2S, Display, TEXT("capture: %d reachable grid points left out, outside GaussianVoxelLimit"), OutsideLimits);
+	}
+	if (V->bTightSpots)
+	{
+		UE_LOG(LogG2S, Display, TEXT("capture: tight spots: %d of the positions are finer points in gaps narrower than "
+			"%.2f m (%d tried, %d beside one surface only)"),
+			FineTaken, (Spacing + 2.f * V->MinClearance) / 100.f, FineTried, FineOpen);
 	}
 	const int32 MaxPositions = V->MaxPositions > 0 ? V->MaxPositions : G2SPlanner::AutoMaxPositions(V->ImageSize);
 	if (Positions.Num() > MaxPositions)
@@ -987,6 +1018,41 @@ bool FG2SCaptureJob::FindLimits()
 		Limits.Add(L);
 	}
 	return true;
+}
+
+void FG2SCaptureJob::TryTightSpot(const FVector& At, int32 Parent, bool bFill)
+{
+	// A grid point too close to a surface: try the eight points at half the spacing in
+	// its cell. A gap narrower than the grid (behind a couch, between furniture) then
+	// gets cameras that the grid steps over. Only points that the position which
+	// reached this cell sees directly are tried, so none ends up inside furniture or
+	// behind a wall; each is then probed like any grid point.
+	if (!Positions.IsValidIndex(Parent))
+	{
+		return;
+	}
+	ASplatCaptureVolume* V = Volume.Get();
+	const FVector From = Positions[Parent];
+	if (CachedParent != Parent)
+	{
+		// Entries reached from the same position follow each other in the queue.
+		CachedParentProbe = Probe(From);
+		CachedParent = Parent;
+	}
+	for (const FVector& To : Grid.FinePositions(Grid.CellOf(At)))
+	{
+		if (FVector::Dist(From, To) > V->CameraSpacing * 2.5f
+			|| (bFill && FVector::Dist(V->GetActorLocation(), To) > V->FillReach)
+			|| !InsideLimits(To)
+			|| !G2SPlanner::Sees(CachedParentProbe, Faces, ProbeSize, From, To, 5.f))
+		{
+			continue;
+		}
+		Queue.Add(To);
+		QueueParent.Add(Parent);
+		QueueFine.Add(1);
+		++FineTried;
+	}
 }
 
 bool FG2SCaptureJob::InsideLimits(const FVector& At) const

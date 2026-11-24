@@ -63,6 +63,20 @@ class Grid:
 		var jitter := Vector3(rng.randf_range(-0.3, 0.3), rng.randf_range(-0.3, 0.3), rng.randf_range(-0.3, 0.3))
 		return xf * (offset + (Vector3(c) + Vector3(0.5, 0.5, 0.5) + jitter) * step)
 
+	## The eight points at half the spacing inside cell `c`, each moved a little at
+	## random like the cell's own point (half as far). Tried where the cell's own
+	## point is too close to a surface, so gaps narrower than the grid get cameras.
+	func fine_positions(c: Vector3i) -> PackedVector3Array:
+		var out := PackedVector3Array()
+		for i in 8:
+			var sub := Vector3(0.75 if (i & 1) != 0 else 0.25, 0.75 if (i & 2) != 0 else 0.25,
+					0.75 if (i & 4) != 0 else 0.25)
+			var rng := RandomNumberGenerator.new()
+			rng.seed = hash([c, i]) + 0x85ebca6b
+			var jitter := Vector3(rng.randf_range(-0.15, 0.15), rng.randf_range(-0.15, 0.15), rng.randf_range(-0.15, 0.15))
+			out.append(xf * (offset + (Vector3(c) + sub + jitter) * step))
+		return out
+
 	func cell_of(world: Vector3) -> Vector3i:
 		var local := (xf.affine_inverse() * world - offset) / step
 		return Vector3i(floori(local.x), floori(local.y), floori(local.z))
@@ -108,6 +122,25 @@ static func face_distances(img: Image, far: float) -> PackedFloat32Array:
 
 
 ## Distance from the probe point to the nearest surface in any direction.
+## Width of the narrowest gap the probe stands in: over each pair of opposite faces
+## (face_bases order: +x/-x, +y/-y, +z/-z), the nearest surface in the one plus the
+## nearest in the other. INF when no pair has surfaces on both sides.
+static func gap_width(probe: Array[PackedFloat32Array]) -> float:
+	var width := INF
+	for i in range(0, probe.size() - 1, 2):
+		var a := INF
+		var b := INF
+		for d in probe[i]:
+			if d > 0.0 and d < a:
+				a = d
+		for d in probe[i + 1]:
+			if d > 0.0 and d < b:
+				b = d
+		if a < INF and b < INF:
+			width = minf(width, a + b)
+	return width
+
+
 static func clearance(probe: Array[PackedFloat32Array]) -> float:
 	var nearest := INF
 	for face in probe:

@@ -79,6 +79,7 @@ private:
 	bool TickPlan();
 	bool FindLimits();
 	bool InsideLimits(const FVector& At) const;
+	void TryTightSpot(const FVector& At, int32 Parent, bool bFill);
 	bool TickShoot();
 	bool TickSky();
 	bool WriteManifest();
@@ -125,6 +126,13 @@ private:
 	TSet<FIntVector> Seen;
 	int32 Outdoors = 0;
 	TArray<FVector> Queue;
+	TArray<int32> QueueParent;   // the position (index in Positions) that reached each entry; INDEX_NONE for start points
+	TArray<uint8> QueueFine;     // 1: a finer point tried in a tight spot (not refined further)
+	int32 FineTried = 0;
+	int32 FineTaken = 0;
+	int32 FineOpen = 0;          // finer points in open air but beside one surface only: not taken
+	int32 CachedParent = INDEX_NONE;
+	G2SPlanner::FProbe CachedParentProbe;
 	int32 Seeds = 0;
 	int32 Next = 0;
 	int32 TooClose = 0;

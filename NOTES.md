@@ -193,6 +193,41 @@ is unchanged. By eye: the patches are gone and the windows still show the sky.
 Not done: training could leave less transparency to begin with (a stronger opacity term on
 surfaces). The compositor fix also covers splats already trained.
 
+### Missed areas behind furniture: Tight Spots (done, Unreal and Godot)
+
+The living room splat had a smeared, half-transparent couch back. Its capture.json (58
+positions, 1 m spacing): no camera stood in the corridor behind the couch, 0.85 m between
+the couch back and the cabinets' fronts. At 30 cm clearance a camera fits only in a 25 cm
+band there, and the 1 m grid (points moved up to 30 cm at random) stepped over it. The
+cameras on that side stood above the couch and saw its back edge-on.
+
+Fix (`TryTightSpot` in CaptureJob.cpp; capture_runner.gd): a grid point too close to a
+surface has the eight points at half the spacing in its cell tried instead. Only points that
+the position which reached the cell sees directly (one extra probe of that position), so none
+lands inside furniture or behind a wall. A finer point is taken only in a gap: surfaces on
+two opposite sides closer together than spacing + 2 x clearance (1.6 m by default). Finer
+points need half the clearance; at full clearance they missed most of such a corridor.
+
+Tested on the test room with a couch-like box 0.85 m in front of a sideboard (the living
+room's corridor). Godot, four start offsets (0, 25, 50, 75 cm along x), off-screen. "Seen
+head-on" means within 50 degrees of the surface normal, by line of sight, from under 4 m.
+
+| | positions | couch back seen head-on by 2+ cameras | all furniture, same |
+|---|---|---|---|
+| off | 44-49 | 0%, 1%, 0%, 13% | 51-57% |
+| on, full clearance | 87-99 | 48%, 26%, 36%, 28% | 58-68% |
+| on, half clearance (kept) | 135-150 | 63%, 66%, 67%, 98% | 66-73% |
+
+Every position stayed in open air. The test room is cluttered, so the count roughly tripled.
+Over the position budget, thinning removes finer points first, since they sit close to others.
+Unreal, same room at the default offset:
+- Off: 48 positions. Couch back seen head-on by 2+ cameras 0%; all furniture 56.8%.
+- On: 153 positions, 105 of them finer points. Couch back 45%; all furniture 71.8%.
+- Every camera inside the room, at least 0.15 m from a surface.
+
+Not run since: `pytest -m godot` and `pytest -m unreal`, whose clearance checks were relaxed
+from 0.27 m to 0.12 m for the finer points.
+
 ### Slow on an 8 GB laptop GPU: `--keep` budget (done)
 
 The living room splat (4.44M Gaussians) on the RTX 5060 Laptop, measured off-screen at

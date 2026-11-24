@@ -280,7 +280,8 @@ func _plan_positions() -> PackedVector3Array:
 		view.render_target_update_mode = SubViewport.UPDATE_ALWAYS
 	# A grid cell is reached when an accepted position sees it. Box: only cells inside
 	# the box. Fill: any cell within fill_reach, except that cells which see mostly
-	# sky (outdoors) are not taken and the walk does not go on from them.
+	# sky (outdoors) are not taken and the walk does not go on from them. Both: a cell
+	# too close to a surface has its finer points tried instead (tight_spots).
 	var spacing := _volume.camera_spacing
 	var fill := _volume.placement == Volume.Placement.FILL
 	var grid: Planner.Grid = Planner.Grid.fill(_volume.global_transform, spacing) if fill \
@@ -298,24 +299,66 @@ func _plan_positions() -> PackedVector3Array:
 	for basis in _face_bases:
 		inverse_bases.append(basis.inverse())
 
+	# Per queue entry: the accepted position that reached it (-1: a start point), and
+	# whether it is a finer point tried in a tight spot (those are not refined again).
+	var queue_parent := PackedInt32Array()
+	var queue_fine := PackedByteArray()
+	for i in seeds:
+		queue_parent.append(-1)
+		queue_fine.append(0)
+	var fine_tried := 0
+	var fine_taken := 0
+	var fine_open := 0
+	var cached_parent := -1
+	var parent_probe: Array[PackedFloat32Array] = []
+
 	var accepted := PackedVector3Array()
 	var too_close := 0
 	var next := 0
 	while next < queue.size():
-		var at := queue[next]
+		var index := next
+		var at := queue[index]
 		next += 1
 		var probe := await _probe(at)
 		var room := Planner.clearance(probe)
-		if room < _volume.min_clearance:
-			if next <= seeds:
+		# Finer points stand in gaps: half the clearance, or most gaps would have no
+		# room for them (a 0.85 m gap leaves 25 cm at 30 cm from both sides).
+		if room < _volume.min_clearance * (0.5 if queue_fine[index] == 1 else 1.0):
+			if index < seeds:
 				_fail("start point %s is %.2f m from a surface (min_clearance is %.2f m). Move the SplatCaptureVolume or its Marker3D into open air." % [at, room, _volume.min_clearance])
 				return PackedVector3Array()
 			too_close += 1
+			var parent := queue_parent[index]
+			if _volume.tight_spots and queue_fine[index] == 0 and parent >= 0:
+				# Try the eight points at half the spacing in this cell, so a gap
+				# narrower than the grid (behind a couch, between furniture) gets
+				# cameras. Only points the position that reached this cell sees
+				# directly, so none ends up inside furniture or behind a wall.
+				var from := accepted[parent]
+				if cached_parent != parent:
+					parent_probe = await _probe(from)
+					cached_parent = parent
+				for to in grid.fine_positions(grid.cell_of(at)):
+					if from.distance_to(to) > spacing * 2.5 \
+							or (fill and _volume.global_position.distance_to(to) > _volume.fill_reach) \
+							or not Planner.sees(parent_probe, inverse_bases, PROBE_SIZE, from, to, 0.05):
+						continue
+					queue.append(to)
+					queue_parent.append(parent)
+					queue_fine.append(1)
+					fine_tried += 1
 			continue
-		if fill and next > seeds and Planner.sky_share(probe) > _volume.outdoor_sky_share:
+		if queue_fine[index] == 1 and Planner.gap_width(probe) >= spacing + 2.0 * _volume.min_clearance:
+			# Next to one surface only, such as a plain wall: the grid's own points see
+			# it. A finer point is for gaps the grid can step over.
+			fine_open += 1
+			continue
+		if fill and index >= seeds and Planner.sky_share(probe) > _volume.outdoor_sky_share:
 			outdoors += 1
 			continue
 		accepted.append(at)
+		var me := accepted.size() - 1
+		fine_taken += queue_fine[index]
 		var here := grid.cell_of(at)
 		for dx in range(-reach, reach + 1):
 			for dy in range(-reach, reach + 1):
@@ -330,6 +373,8 @@ func _plan_positions() -> PackedVector3Array:
 						continue
 					seen[c] = true
 					queue.append(to)
+					queue_parent.append(me)
+					queue_fine.append(0)
 		if next % 10 == 0:
 			_progress("finding free space: %d camera positions" % accepted.size())
 	for view in _probe_views:
@@ -344,6 +389,9 @@ func _plan_positions() -> PackedVector3Array:
 	else:
 		print("capture: %d of %d grid points are in reachable open space (%d too close to a surface)" % [
 				accepted.size() - seeds, grid.num_cells(), too_close])
+	if _volume.tight_spots:
+		print("capture: tight spots: %d of the positions are finer points in gaps narrower than %.2f m (%d tried, %d beside one surface only)" % [
+				fine_taken, spacing + 2.0 * _volume.min_clearance, fine_tried, fine_open])
 	var max_positions := _volume.max_positions if _volume.max_positions > 0 \
 			else Planner.auto_max_positions(_volume.image_size)
 	if accepted.size() > max_positions:

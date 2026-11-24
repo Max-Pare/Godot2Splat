@@ -92,7 +92,8 @@ The capture opens a small Godot window for a few seconds. Godot's headless mode 
 | Outdoor Sky Share | 0.3 | Fill: a cell that sees more than this share of sky is outdoors and stops the fill; 1 never stops |
 | Size | 10 x 4 x 10 m | Box: box in which cameras are placed |
 | Camera Spacing | 1 m | distance between camera positions; each gives 6 pictures |
-| Min Clearance | 0.3 m | cameras keep this distance from every surface |
+| Min Clearance | 0.3 m | cameras keep this distance from every surface (half of it in tight spots) |
+| Tight Spots | on | where a grid point is too close to a surface, try the points at half the spacing around it. One is taken only in a gap narrower than `Camera Spacing` + 2 x `Min Clearance` (surfaces on two opposite sides), such as behind a couch, between furniture or under a table, and may come within half of `Min Clearance`. Beside a single wall nothing is added |
 | Max Positions | 0 | more than this are thinned out evenly. 0: as many as training holds in memory, 1.5 gigapixels of pictures (390 positions at 800 px, 610 at 640 px, about 6 GB of RAM). Raise it on a machine with more memory |
 | Image Size | 800 px | width and height of each picture; training time follows the pixel count |
 | Test Every | 10 | every n-th position is held out of training and used to score the result; 0 holds nothing out |

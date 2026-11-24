@@ -75,6 +75,14 @@ public:
 	float MinClearance = 30.f;
 
 	/**
+	 * Where a grid point is too close to a surface, try the points at half the spacing
+	 * around it. Gaps narrower than the grid (behind a couch, between furniture) then
+	 * get cameras too.
+	 */
+	UPROPERTY(EditAnywhere, Category = "Splat Capture")
+	bool bTightSpots = true;
+
+	/**
 	 * Upper limit on camera positions; more than this are thinned out evenly.
 	 * 0: as many as training can hold in memory (1.5 gigapixels of pictures: 390
 	 * positions at 800 px, 610 at 640 px).

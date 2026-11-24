@@ -90,6 +90,24 @@ namespace G2SPlanner
 			return Xf.TransformPosition(Offset + (FVector(C) + FVector(0.5) + Jitter) * Step);
 		}
 
+		/**
+		 * The eight points at half the spacing inside cell `C`, each moved a little at
+		 * random like the cell's own point (half as far). Tried where the cell's own
+		 * point is too close to a surface, so gaps narrower than the grid get cameras.
+		 */
+		TArray<FVector, TFixedAllocator<8>> FinePositions(const FIntVector& C) const
+		{
+			TArray<FVector, TFixedAllocator<8>> Out;
+			for (int32 I = 0; I < 8; ++I)
+			{
+				const FVector Sub((I & 1) ? 0.75 : 0.25, (I & 2) ? 0.75 : 0.25, (I & 4) ? 0.75 : 0.25);
+				FRandomStream Rng(int32(HashCombine(GetTypeHash(C), 0x85ebca6bu + uint32(I))));
+				const FVector Jitter(Rng.FRandRange(-0.15f, 0.15f), Rng.FRandRange(-0.15f, 0.15f), Rng.FRandRange(-0.15f, 0.15f));
+				Out.Add(Xf.TransformPosition(Offset + (FVector(C) + Sub + Jitter) * Step));
+			}
+			return Out;
+		}
+
 		FIntVector CellOf(const FVector& World) const
 		{
 			const FVector L = (Xf.InverseTransformPosition(World) - Offset) / Step;
@@ -149,6 +167,37 @@ namespace G2SPlanner
 	}
 
 	/** Distance from the probe point to the nearest surface in any direction. */
+	/**
+	 * Width of the narrowest gap the probe stands in: over each pair of opposite faces
+	 * (forward/back, right/left, up/down; FaceRotations order), the nearest surface in
+	 * the one plus the nearest in the other. Max when no pair has surfaces on both sides.
+	 */
+	inline float GapWidth(const FProbe& Probe)
+	{
+		auto Nearest = [](const TArray<float>& Face)
+		{
+			float N = TNumericLimits<float>::Max();
+			for (float D : Face)
+			{
+				if (D > 0.f && D < N)
+				{
+					N = D;
+				}
+			}
+			return N;
+		};
+		float Width = TNumericLimits<float>::Max();
+		for (int32 I = 0; I + 1 < Probe.Num(); I += 2)
+		{
+			const float A = Nearest(Probe[I]), B = Nearest(Probe[I + 1]);
+			if (A < TNumericLimits<float>::Max() && B < TNumericLimits<float>::Max())
+			{
+				Width = FMath::Min(Width, A + B);
+			}
+		}
+		return Width;
+	}
+
 	inline float Clearance(const FProbe& Probe)
 	{
 		float Nearest = TNumericLimits<float>::Max();

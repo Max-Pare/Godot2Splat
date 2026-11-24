@@ -97,7 +97,8 @@ def test_cameras_stand_in_open_air(built):
     # Fill placement (the default): the room's open space, and nothing outside its window.
     assert len(positions) == cap["positions"] >= 40
     assert fixture_room.in_open_air(positions).all()
-    assert fixture_room.surface_distance(positions).min() > 0.27
+    # Finer points in tight spots may come within half of Min Clearance (30 cm).
+    assert fixture_room.surface_distance(positions).min() > 0.12
 
 
 def test_held_out_views_are_reproduced(built):

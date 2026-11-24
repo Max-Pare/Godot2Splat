@@ -44,6 +44,10 @@ enum Placement {
 @export_range(0.25, 5.0, 0.05, "suffix:m") var camera_spacing := 1.0
 ## Cameras keep at least this distance from every surface.
 @export_range(0.05, 2.0, 0.05, "suffix:m") var min_clearance := 0.3
+## Where a grid point is too close to a surface, try the points at half the spacing
+## around it. Gaps narrower than the grid (behind a couch, between furniture) then get
+## cameras too.
+@export var tight_spots := true
 ## Upper limit on camera positions; more than this are thinned out evenly.
 ## 0: as many as training can hold in memory (1.5 gigapixels of pictures: 390
 ## positions at 800 px, 610 at 640 px).

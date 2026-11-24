@@ -75,9 +75,10 @@ def test_cameras_stand_in_open_air(built):
     positions = np.unique(np.array([v["transform"][9:] for v in cap["views"]]).round(5), axis=0)
     assert len(positions) == cap["positions"] >= 30
     # The planner samples distances on a 64 px grid per cube face, so allow it 3 cm.
+    # Finer points in tight spots may come within half of min_clearance (0.3 m).
     clearance = fixture_room.surface_distance(positions)
     assert fixture_room.in_open_air(positions).all()
-    assert clearance.min() > 0.27, f"a camera is {clearance.min():.2f} m from a surface"
+    assert clearance.min() > 0.12, f"a camera is {clearance.min():.2f} m from a surface"
     # The free space of the room is one piece: most grid points should be reached.
     assert len(positions) >= 50
 
