@@ -193,6 +193,39 @@ is unchanged. By eye: the patches are gone and the windows still show the sky.
 Not done: training could leave less transparency to begin with (a stronger opacity term on
 surfaces). The compositor fix also covers splats already trained.
 
+### Slow on an 8 GB laptop GPU: `--keep` budget (done)
+
+The living room splat (4.44M Gaussians) on the RTX 5060 Laptop, measured off-screen at
+1920x1080 with vsync off:
+- Frame time: 23 ms with the whole room in view, 13 ms facing a wall.
+- Godot VRAM: 3.66 GiB, of which gdgs buffers 2.41 GiB. Per splat that is 240 B of data
+  plus 16 sort entries (keys and values, double-buffered, 128 B each); a whole-room view
+  needs 2.5 entries per splat.
+- Render scale barely helps: at 75% and 50% the whole-room view took 19.7 and 17.2 ms. Most
+  of the time is per splat (projecting 4.44M, sorting ~11M tile entries), not per pixel.
+
+Fix: `--keep N` in cleanup keeps the N Gaussians with the largest total blending weight
+over the training views (LightGaussian's global significance). The weight is the gradient
+of a picture rendered with all colours 1, by colour; held-out views are left out of the
+choice. Tried on the exported splat with a 1 m camera grid (420 views, 15 s on the 5060),
+judged against the full splat from 56 other views:
+
+| keep | share of the pictures | PSNR vs full (worst) | whole room | wall | VRAM |
+|---|---|---|---|---|---|
+| 3.0M | 97.7% | 41.2 dB (33.8) | | | |
+| 2.2M | 93.3% | 36.3 dB (28.7) | 14.6 ms | 8.5 ms | 1.95 GiB |
+| 1.5M | 85.7% | 32.0 dB (24.9) | 11.4 ms | 6.7 ms | 1.58 GiB |
+| 1.0M | 76.2% | 28.2 dB (22.1) | | | |
+
+At 2.2M the pictures look the same side by side. The stage ran end to end on a short
+training (`clean.json` gets `over_budget` and `kept_share_of_the_pictures`). Not yet run
+on the 4090 workspace, where cleanup scores the result against the held-out photos.
+
+Not done:
+- Fine-tuning after the cut, as LightGaussian does, would win back some of the loss.
+- gdgs's sort buffers could be sized to what views need instead of 16 entries per splat
+  (about 1 GB at 4.44M).
+
 ### Strays outside the level (fixed)
 
 Seen in Godot on the 5090 corridor splat: the splat node's bounding box many times larger than

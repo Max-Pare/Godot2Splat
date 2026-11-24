@@ -75,3 +75,25 @@ def test_hidden_points_are_the_ones_no_view_shows():
     _, hidden = clean.free_and_hidden(pts, [depth], K[None], c2ws, margin=0.03, margin_rel=0.01,
                                       min_views=1, min_share=0.8)
     assert hidden.tolist() == [False, False, True, True, False]
+
+
+def test_contribution_weighs_what_the_pictures_show():
+    """A Gaussian hidden behind a wider opaque one adds next to nothing (Gaussians have
+    soft edges, so one the same size would show around it); a faint one adds little."""
+    torch = pytest.importorskip("torch")
+    if not torch.cuda.is_available():
+        pytest.skip("no GPU")
+    pytest.importorskip("gsplat")
+    from g2s import geometry
+
+    # Camera at the origin looking down +z (OpenCV); front, hidden behind it, faint beside.
+    means = np.array([[0.0, 0.0, 3.0], [0.0, 0.0, 4.0], [1.0, 0.0, 3.0]])
+    arr = {"means": means,
+           "quats": np.tile([1.0, 0.0, 0.0, 0.0], (3, 1)),
+           "scales": np.log(np.array([[0.6] * 3, [0.2] * 3, [0.2] * 3])),
+           "opacities": np.log(np.array([0.99, 0.99, 0.05]) / (1 - np.array([0.99, 0.99, 0.05])))}
+    K = geometry.intrinsics(200, 200, 90)
+    w = clean.contribution(arr, np.eye(4)[None], K[None], np.array([[200, 200]]), "cuda", scale=1.0)
+    front, hidden, faint = w
+    assert front > 10 * faint > 0
+    assert hidden < 0.02 * front

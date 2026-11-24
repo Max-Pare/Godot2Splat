@@ -54,6 +54,9 @@ class TrainCfg:
 @dataclass
 class CleanCfg:
     min_opacity: float = 0.02         # below this a Gaussian only adds haze
+    # At most this many Gaussians: those that add most to the pictures (0 keeps all).
+    # Rendering time and VRAM in Godot follow the count; a budget for weaker GPUs.
+    keep: int = 0
     # Fewer kept than this share means training failed: stop before export.
     min_kept_share: float = 0.05
     # Size limits are the larger of a fixed length (metres) and a share of the

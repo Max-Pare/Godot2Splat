@@ -3,6 +3,7 @@
 1. Drop Gaussians that only add haze: near-transparent, oversized, needle-shaped, isolated.
 2. Drop Gaussians floating in space that the scene's depth maps show as empty, and
    Gaussians no view shows (hidden behind the surface in every view).
+3. With a budget (`keep`), keep only the Gaussians that add most to the pictures.
 
 Later stages read the result through `output()`.
 """
@@ -14,7 +15,7 @@ from pathlib import Path
 import numpy as np
 
 from .. import device as device_mod
-from .. import geometry, splat_io
+from .. import geometry, gsplat_compat, splat_io
 from ..config import Config
 from ..workspace import Workspace
 from . import ingest, train
@@ -132,6 +133,36 @@ def _depth_views(ws: Workspace, scene: dict, device):
             torch.tensor(scene["c2w"], dtype=torch.float32, device=device))
 
 
+def contribution(arr: dict, c2ws: np.ndarray, Ks: np.ndarray, sizes: np.ndarray, device,
+                 scale: float = 0.5) -> np.ndarray:
+    """How much each Gaussian adds to the pictures: its blending weight (its opacity
+    times the transparency in front of it) summed over every pixel of every view, the
+    views rendered at `scale` of their size. LightGaussian's global significance
+    (arXiv 2311.17245). With every colour 1 the picture is the sum of those weights,
+    so the gradient of its sum by a Gaussian's colour is exactly that Gaussian's weight."""
+    import torch
+    gsplat_compat.prepare()
+    from gsplat import rasterization
+
+    def t(a):
+        return torch.tensor(np.asarray(a), dtype=torch.float32, device=device)
+
+    means, quats = t(arr["means"]), t(arr["quats"])
+    scales, opacities = torch.exp(t(arr["scales"])), torch.sigmoid(t(arr["opacities"]))
+    ones = torch.ones((len(means), 3), device=device, requires_grad=True)
+    total = torch.zeros(len(means), device=device)
+    for c2w, K, (w0, h0) in zip(c2ws, Ks, sizes):
+        w, h = max(1, round(w0 * scale)), max(1, round(h0 * scale))
+        image, _, _ = rasterization(
+            means=means, quats=quats, scales=scales, opacities=opacities, colors=ones,
+            viewmats=torch.linalg.inv(t(c2w))[None], Ks=t(geometry.scale_K(K, w / w0, h / h0))[None],
+            width=w, height=h, packed=False)
+        image.sum().backward()
+        total += ones.grad.sum(dim=1) / 3
+        ones.grad = None
+    return total.cpu().numpy()
+
+
 def run(ws: Workspace, cfg: Config) -> None:
     import torch
 
@@ -165,19 +196,35 @@ def run(ws: Workspace, cfg: Config) -> None:
             gone |= hidden
     arr = {k: v[~gone] for k, v in arr.items()}
 
+    if c.keep and len(arr["means"]) > c.keep:
+        # Held-out views stay out of the choice, so the score below is a fair one.
+        which = np.flatnonzero(scene["split"] == "train")
+        print(f"clean: weighing {len(arr['means'])} Gaussians over {len(which)} views "
+              f"to keep {c.keep}", flush=True)
+        weight = contribution(arr, scene["c2w"][which], scene["K"][which], scene["sizes"][which],
+                              device_mod.resolve(cfg.device))
+        kept = np.sort(np.argsort(-weight)[:c.keep])
+        stats["over_budget"] = len(arr["means"]) - c.keep
+        stats["kept_share_of_the_pictures"] = float(weight[kept].sum() / max(float(weight.sum()), 1e-12))
+        arr = {k: v[kept] for k, v in arr.items()}
+
     stats["after"] = len(arr["means"])
     d = ws.reset("clean")
     torch.save({k: torch.from_numpy(v) for k, v in arr.items()}, d / "ckpt.pt")
     splat_io.write_ply(d / "scene.ply", **{k: arr[k] for k in train.PARAM_NAMES})
     (d / "clean.json").write_text(json.dumps(stats, indent=2))
     removed = ", ".join(f"{stats[k]} {k.replace('_', ' ')}" for k in
-                        ("transparent", "oversized", "needle", "isolated", "in_free_space", "hidden")
+                        ("transparent", "oversized", "needle", "isolated", "in_free_space", "hidden",
+                         "over_budget")
                         if k in stats)
     print(f"clean: {n0} Gaussians -> {stats['after']} (removed {removed})")
+    if "over_budget" in stats:
+        print(f"clean: the {stats['after']} kept add {stats['kept_share_of_the_pictures']:.1%} "
+              f"of what all of them added to the training pictures")
 
     from .. import evaluate
     evaluate.report(ws, cfg, "clean")
-    if stats["after"] < c.min_kept_share * n0:
+    if stats["after"] + stats.get("over_budget", 0) < c.min_kept_share * n0:
         # A healthy run keeps about half. Exporting this would replace the splat in the
         # Godot project with almost nothing.
         raise SystemExit(f"clean: only {stats['after']} of {n0} Gaussians are left; training failed. "

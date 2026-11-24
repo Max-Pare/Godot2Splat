@@ -104,7 +104,17 @@ The capture opens a small Godot window for a few seconds. Godot's headless mode 
 | Max Gaussians, Training Steps | 0 | 0 sizes the training to the scan |
 | Output Dir | `res://splats/<scene>/` | where the splat and the generated scene go |
 
-`g2s build` options: `--steps`, `--cap` (override the node), `--train-scale` (percent of the picture size used for training), `--depth-weight`, `--workspace`, `--godot`, `--device auto|cuda|rocm`, `--only`, `--force`, `--no-godot-import`.
+`g2s build` options: `--steps`, `--cap` (override the node), `--keep` (see below), `--train-scale` (percent of the picture size used for training), `--depth-weight`, `--workspace`, `--godot`, `--device auto|cuda|rocm`, `--only`, `--force`, `--no-godot-import`.
+
+Rendering time and VRAM in Godot follow the number of Gaussians: projecting and sorting them costs more than drawing the pixels. `--keep N` makes cleanup keep only the N that add most to the training pictures. It needs no new training, so after a build `g2s build ... --keep 2200000` reruns only cleanup and export. Measured on an RTX 5060 Laptop (8 GB) at 1920x1080 with a 4.44M living room:
+
+| Gaussians | Whole room in view | Facing a wall | Godot VRAM | Against the full splat |
+|---|---|---|---|---|
+| 4.44M | 23 ms (43 fps) | 13 ms | 3.7 GiB | |
+| 2.2M (`--keep 2200000`) | 15 ms (68 fps) | 8.5 ms | 2.0 GiB | 36 dB, no visible difference |
+| 1.5M (`--keep 1500000`) | 11 ms (88 fps) | 6.7 ms | 1.6 GiB | 32 dB |
+
+Lowering the render scale helps less: half the resolution took the whole-room view from 23 to 17 ms. While the splat scene is also open in the editor, the editor holds its own copy on the GPU next to the game's.
 
 ## Highlighted objects (SplatObject)
 

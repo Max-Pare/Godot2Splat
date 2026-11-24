@@ -44,6 +44,7 @@ def build(
     workspace: Optional[Path] = typer.Option(None, help="Cache folder for stage outputs (default <project>/.g2s/<scene name>)."),
     steps: Optional[int] = typer.Option(None, help="Training steps (default: from the capture volume, else sized to the capture)."),
     cap: Optional[int] = typer.Option(None, help="Maximum number of Gaussians (default: from the capture volume, else sized to the capture)."),
+    keep: int = typer.Option(0, min=0, help="After cleanup keep at most this many Gaussians: the ones that add most to the pictures. 0 keeps all. Rendering time and VRAM in Godot follow the count."),
     train_scale: float = typer.Option(100.0, min=10.0, max=100.0, help="Percent of the captured image size used for training. Lower is faster and a little softer."),
     depth_weight: float = typer.Option(0.2, help="Weight of the depth term in training; 0 turns it off."),
     godot: str = typer.Option("godot", envvar="G2S_GODOT", help="Godot editor binary (4.3 or newer)."),
@@ -100,6 +101,7 @@ def build(
     cfg.train.cap = cap
     cfg.train.train_scale = train_scale
     cfg.train.depth_weight = depth_weight
+    cfg.clean.keep = keep
     cfg.export.godot_import = godot_import
     cfg.export.godot_project = str(godot_project.resolve()) if godot_project else ""
 
@@ -119,6 +121,8 @@ def build(
             for name in ("origin", "box", "settings"):
                 if not payload[name]:
                     payload.pop(name)
+        if stage == "clean" and not payload["keep"]:
+            payload.pop("keep")   # absent from caches made before --keep
         key = make_key(key, payload)
         if stage == "capture" and captured:
             if not (ws.dir("capture") / "capture.json").exists():
