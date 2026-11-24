@@ -142,6 +142,31 @@ view, as in the game.
 Still to confirm on the 5090: the capture log should say "measured at the start point as
 4.78, held to the level's range 8.00 to 12.00".
 
+### Unreal scans were dark and flat: Lumen was off in the captures (fixed, to confirm on the 4090)
+
+Seen on the 4090 with a living room level: the capture pictures themselves were dark and flat,
+with lit patches under the windows and black walls next to them. The level sets Manual
+exposure, so exposure was not the cause. Unreal's scene captures switch Lumen off unless
+their own post process settings turn it back on (`SceneCaptureRendering.cpp`: global
+illumination and reflection method forced to None, surface cache at half resolution). The
+scan had direct light only: no bounce light, no Lumen reflections.
+
+Fix (`UseLevelLighting` in CaptureJob.cpp): the colour capture and the exposure meter take the
+level's methods at the start point (the project's `r.DynamicGlobalIlluminationMethod` and
+`r.ReflectionMethod`, then the post process volumes there). The colour capture also takes the
+level's surface cache resolution. Two warmups were too short once Lumen was on:
+- the meter read 0.3 EV low after 16 frames (its Lumen starts empty), so it now gets at least 120;
+- the first view came out 16 levels (of 255) darker, so it also gets at least 120.
+
+The test room never had Lumen: Lumen needs SM6 on Windows and mesh distance fields, and the
+fixture project had neither. `tests/unreal_fixture` now has both. `pytest -m unreal` has not run
+since; its thresholds (41.2 dB held out) date from before Lumen.
+
+Checked on the test room at SM6 with distance fields, off-screen, same 36 positions:
+- Old plugin: walls lit only by bounce light came out black, the rest flat grey.
+- New plugin: warm bounce light on those walls. Mean picture difference 37 of 255.
+- 16 against 64 warmup frames, same exposure: 40.7 dB, mean difference 1.3, worst picture 2.4 after the first-view fix.
+
 ### Strays outside the level (fixed)
 
 Seen in Godot on the 5090 corridor splat: the splat node's bounding box many times larger than
@@ -216,7 +241,8 @@ were added for this. The 5090 run used them (351 positions) but collapsed, so th
 - The Scan to Splat buttons clicked by hand, in Unreal and in Godot. Only the test hooks and the command line have run.
 - Texture sharpness of Unreal captures with the viewports not drawing (`r.Streaming.FullyLoadUsedTextures`
   is forced on, but not checked on a level with streamed textures).
-- Lumen-heavy levels: whether 16 warmup frames are enough per view. Look for noisy or flickering pictures.
+- Lumen-heavy levels: 16 warmup frames per view match 64 on the test room (40.7 dB, see "Lumen was off"
+  above). A level with more bounce or emissive lighting may need more; look for noisy or flickering pictures.
 - Unreal versions other than 5.8, Linux with Unreal, the Mobile renderer in Godot.
 - World Partition: only the corridor level so far. Regions are loaded around the start actor, out to `Fill Reach` plus 100 m.
 - Collision is not carried over from Unreal (the Godot scene has no `Collision` node).

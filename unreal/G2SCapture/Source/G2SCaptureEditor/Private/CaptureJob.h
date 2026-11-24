@@ -72,6 +72,7 @@ private:
 	USceneCaptureComponent2D* NewCapture(int32 Size, bool bDepth, bool bHdr);
 	void ConfigureColour(USceneCaptureComponent2D* Capture);
 	void FindSky();
+	void UseLevelLighting();
 
 	bool TickSettle();
 	bool TickMeter();

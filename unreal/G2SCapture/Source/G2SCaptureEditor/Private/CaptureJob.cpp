@@ -68,14 +68,15 @@ namespace
 	}
 
 	/**
-	 * The level's auto exposure settings for a view at a point: the project defaults,
-	 * then every post process volume there, blended the way the renderer does it
+	 * The level's settings for a view at a point: the project defaults, then every
+	 * post process volume there, blended the way the renderer does it
 	 * (UWorld::AddPostProcessingSettings, FSceneView::OverridePostProcessSettings): in
 	 * order of priority, unbound volumes first among equals, each weighted by its blend
-	 * weight and blend radius. Only the auto exposure fields; the scan needs no others.
+	 * weight and blend radius. Only the fields the scan needs: auto exposure, and the
+	 * global illumination and reflection methods with Lumen's surface cache resolution.
 	 * Min and max brightness are returned in EV100 whatever the project setting.
 	 */
-	FPostProcessSettings LevelExposureAt(UWorld* W, const FVector& At)
+	FPostProcessSettings LevelSettingsAt(UWorld* W, const FVector& At)
 	{
 		struct FEntry
 		{
@@ -116,9 +117,21 @@ namespace
 		});
 
 		FPostProcessSettings Out;  // the project's defaults
+		// The methods come from the project settings (FSceneView::StartFinalPostprocessSettings).
+		if (IConsoleVariable* CVar = IConsoleManager::Get().FindConsoleVariable(TEXT("r.DynamicGlobalIlluminationMethod")))
+		{
+			Out.DynamicGlobalIlluminationMethod = EDynamicGlobalIlluminationMethod::Type(CVar->GetInt());
+		}
+		if (IConsoleVariable* CVar = IConsoleManager::Get().FindConsoleVariable(TEXT("r.ReflectionMethod")))
+		{
+			Out.ReflectionMethod = EReflectionMethod::Type(CVar->GetInt());
+		}
 		for (const FEntry& E : Entries)
 		{
 			const FPostProcessSettings& S = *E.Props.Settings;
+			if (S.bOverride_DynamicGlobalIlluminationMethod) Out.DynamicGlobalIlluminationMethod = S.DynamicGlobalIlluminationMethod;
+			if (S.bOverride_ReflectionMethod) Out.ReflectionMethod = S.ReflectionMethod;
+			if (S.bOverride_LumenSurfaceCacheResolution) Out.LumenSurfaceCacheResolution = FMath::Lerp(Out.LumenSurfaceCacheResolution, S.LumenSurfaceCacheResolution, E.Weight);
 			if (S.bOverride_AutoExposureMethod) Out.AutoExposureMethod = S.AutoExposureMethod;
 			if (S.bOverride_AutoExposureApplyPhysicalCameraExposure) Out.AutoExposureApplyPhysicalCameraExposure = S.AutoExposureApplyPhysicalCameraExposure;
 			if (S.bOverride_AutoExposureBias) Out.AutoExposureBias = FMath::Lerp(Out.AutoExposureBias, S.AutoExposureBias, E.Weight);
@@ -612,9 +625,49 @@ bool FG2SCaptureJob::TickSettle()
 	{
 		return true;
 	}
+	UseLevelLighting();
 	Counter = 0;
 	Phase = EPhase::Meter;
 	return true;
+}
+
+void FG2SCaptureJob::UseLevelLighting()
+{
+	// Scene captures leave Lumen off unless their own post process settings turn it on
+	// (SceneCaptureRendering.cpp: "By default, Lumen is disabled in scene captures").
+	// Without this the pictures have direct light only, no bounce light and no Lumen
+	// reflections: dark and flat next to the level. The level's methods at the start
+	// point are used for every view, like its exposure.
+	const FPostProcessSettings Level = LevelSettingsAt(World.Get(), Volume->GetActorLocation());
+	auto Use = [&Level](USceneCaptureComponent2D* Capture, bool bSurfaceCache)
+	{
+		FPostProcessSettings& PP = Capture->PostProcessSettings;
+		PP.bOverride_DynamicGlobalIlluminationMethod = true;
+		PP.DynamicGlobalIlluminationMethod = Level.DynamicGlobalIlluminationMethod;
+		PP.bOverride_ReflectionMethod = true;
+		PP.ReflectionMethod = Level.ReflectionMethod;
+		// Scene captures default to half of Lumen's surface cache resolution. The meter's
+		// small pictures keep that; the pictures that are kept get the level's.
+		PP.bOverride_LumenSurfaceCacheResolution = bSurfaceCache;
+		PP.LumenSurfaceCacheResolution = Level.LumenSurfaceCacheResolution;
+	};
+	Use(Colour, true);
+	for (USceneCaptureComponent2D* Meter : MeterCaptures)
+	{
+		Use(Meter, false);
+	}
+	auto Method = [](int32 Value, bool bGI)
+	{
+		switch (Value)
+		{
+		case 0: return TEXT("none");
+		case 1: return TEXT("Lumen");
+		case 2: return TEXT("screen space");
+		default: return bGI ? TEXT("plugin") : TEXT("other");
+		}
+	};
+	Note(FString::Printf(TEXT("lighting as the level sets it at the start point: global illumination %s, reflections %s."),
+		Method(Level.DynamicGlobalIlluminationMethod, true), Method(Level.ReflectionMethod, false)));
 }
 
 bool FG2SCaptureJob::TickMeter()
@@ -624,7 +677,7 @@ bool FG2SCaptureJob::TickMeter()
 	const FVector At = V->GetActorLocation();
 
 	// What the level's own auto exposure would do at the start point.
-	const FPostProcessSettings Level = LevelExposureAt(W, At);
+	const FPostProcessSettings Level = LevelSettingsAt(W, At);
 	// Manual exposure in the level already fixes it for every view.
 	bManualSceneExposure = Level.AutoExposureMethod == AEM_Manual;
 	if (bManualSceneExposure)
@@ -645,7 +698,10 @@ bool FG2SCaptureJob::TickMeter()
 				MeterCaptures[I]->SetWorldLocationAndRotation(At, Faces[I]);
 			}
 		}
-		if (Counter++ < V->WarmupFrames)
+		// The meter's Lumen starts from nothing and its reading sets every picture's
+		// exposure: 16 frames read 0.3 EV low on the test room. It runs once and
+		// its pictures are tiny, so it gets at least 120 frames.
+		if (Counter++ < FMath::Max(V->WarmupFrames, 120))
 		{
 			for (USceneCaptureComponent2D* Meter : MeterCaptures)
 			{
@@ -1002,7 +1058,10 @@ bool FG2SCaptureJob::TickShoot()
 		PlaceShot(ShotIndex);
 	}
 	Colour->CaptureScene();
-	if (++Counter < V->WarmupFrames)
+	// The first view also fills Lumen's surface cache, which starts empty: 16 frames
+	// left it 16 levels (of 255) darker on the test room, later views 1.3.
+	const int32 Frames = ShotIndex == 0 ? FMath::Max(V->WarmupFrames, 120) : V->WarmupFrames;
+	if (++Counter < Frames)
 	{
 		return true;
 	}

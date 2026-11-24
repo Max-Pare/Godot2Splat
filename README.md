@@ -175,6 +175,7 @@ How the Unreal scan differs from the Godot one:
   - The capture log says how many reachable cells it left out.
   - A volume with no collision shape limits by its bounding box instead; the log notes it.
 - Each view is rendered `Warmup Frames` times (default 16) before the picture is taken, so that temporal anti-aliasing and Lumen settle after the camera moves.
+- Global illumination and reflections are the level's: the methods the project sets, or a post process volume at the start point. Unreal's scene captures leave Lumen off unless told otherwise. Scans made before 2026-11-24 had it off, so Lumen levels came out dark and flat, with direct light only.
 - Exposure is the same for every picture. It is measured once at the start point, the way the level's auto exposure would set it there: within the Min and Max EV100 of the post process volumes at that point, with their Exposure Compensation (plus the volume's `Exposure Compensation`, default 0). A post process volume there that sets Manual exposure is used as it is. Tick `Exposure EV100` on the volume to set it yourself. Levels whose rooms have different exposure ranges get the start point's range everywhere.
 - Switched off unless `Keep Screen Space Effects`: screen-space reflections, SSAO, bloom, lens flares, depth of field, motion blur, vignette, grain, chromatic aberration.
 - World Partition levels: the region around the volume or `--origin` actor is loaded for the scan (`Fill Reach` plus 100 m around it).
