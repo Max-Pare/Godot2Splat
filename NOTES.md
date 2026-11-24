@@ -199,6 +199,12 @@ were added for this. The 5090 run used them (351 positions) but collapsed, so th
   Godot's own compression (`ResourceSaver.FLAG_COMPRESS`) was tried first: 5.5% smaller and
   loading 6.5 times slower (0.36 s to 2.3 s), so it is not used. Trained floats barely compress
   (zlib 91%, lzma 89.5%, 81% with the bytes regrouped), so this is about all a lossless change gets.
+- `GaussianVoxelLimit` volumes (Unreal only) stop the fill. Checked on the test room with a Trigger Volume
+  6 x 4.5 x 3.7 m, turned 20 degrees, built from a scratch script, scanned off-screen (`-RenderOffScreen`).
+  The scan took 36 positions, against about 50 without the limit, and left 31 reachable cells out.
+  Every position was inside the turned box, one at 0.999 of its half-size, so the box's shape set the
+  limit and not its bounding box. Not tried: the start point outside the volume, an actor with that
+  name that is not a volume, a volume with no collision shape. Not in `pytest -m unreal`.
 
 ## Needs testing
 

@@ -166,6 +166,14 @@ Unreal-only `g2s build` options: `--origin <actor label>`, `--box auto|LxWxH` (`
 How the Unreal scan differs from the Godot one:
 
 - The editor's level is scanned, not a running game: nothing moves anyway, and Blueprints' construction scripts have run, their BeginPlay has not.
+- To keep the cameras inside part of the level, add a volume and name it `GaussianVoxelLimit`.
+  - Any kind of volume works, for example a Trigger Volume (Place Actors > Volumes). Shape and turn it like any volume.
+  - The fill never goes past it, with Fill and Box placement and with `--origin`.
+  - Copies named `GaussianVoxelLimit2` and so on count too: cameras can go into any of them.
+  - The start point must be inside one.
+  - What lies outside is still captured when it can be seen from inside.
+  - The capture log says how many reachable cells it left out.
+  - A volume with no collision shape limits by its bounding box instead; the log notes it.
 - Each view is rendered `Warmup Frames` times (default 16) before the picture is taken, so that temporal anti-aliasing and Lumen settle after the camera moves.
 - Exposure is the same for every picture. It is measured once at the start point, the way the level's auto exposure would set it there: within the Min and Max EV100 of the post process volumes at that point, with their Exposure Compensation (plus the volume's `Exposure Compensation`, default 0). A post process volume there that sets Manual exposure is used as it is. Tick `Exposure EV100` on the volume to set it yourself. Levels whose rooms have different exposure ranges get the start point's range everywhere.
 - Switched off unless `Keep Screen Space Effects`: screen-space reflections, SSAO, bloom, lens flares, depth of field, motion blur, vignette, grain, chromatic aberration.
@@ -264,7 +272,7 @@ If you instance the splat scene into a scene with its own `WorldEnvironment`, de
 - Very close to large splats (a camera inside a wall, a very high resolution), the renderer can run out of tile sort space. It then leaves out some splats, so the picture gets softer; before the fix it showed flat grey squares. Projects set up before the fix need `g2s install <project> --force` to get it.
 - The gdgs importer claims every `.ply` file in the project, and takes about 1.5 minutes per million Gaussians on first import. The editor does not respond during that time.
 - Cameras fill the space in 3D, so a large level with a small spacing reaches `Max Positions` quickly. The positions are then thinned evenly, which lowers detail everywhere. A machine with more RAM and VRAM can take a higher `Max Positions` and `--cap`.
-- Fill tells indoors from outdoors by how much sky a cell sees. An interior with no sky behind its openings (a building inside a larger enclosed level) is not told apart: limit it with `Fill Reach` or Box placement.
+- Fill tells indoors from outdoors by how much sky a cell sees. An interior with no sky behind its openings (a building inside a larger enclosed level) is not told apart: limit it with `Fill Reach`, Box placement or, in Unreal, a `GaussianVoxelLimit` volume.
 
 ## Tests
 

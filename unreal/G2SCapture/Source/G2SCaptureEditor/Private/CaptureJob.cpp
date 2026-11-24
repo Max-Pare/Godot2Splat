@@ -11,6 +11,7 @@
 #include "Engine/TextureRenderTarget2D.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
+#include "GameFramework/Volume.h"
 #include "HAL/FileManager.h"
 #include "HAL/IConsoleManager.h"
 #include "ImageCore.h"
@@ -740,7 +741,8 @@ bool FG2SCaptureJob::TickPlan()
 	// Walks outward from the start points through everything they can see: a grid
 	// cell is reached when an accepted position sees it. Box: only cells inside the
 	// box. Fill: any cell within Fill Reach, except that cells which see mostly sky
-	// (outdoors) are not taken and the walk does not go on from them.
+	// (outdoors) are not taken and the walk does not go on from them. Both: when the
+	// level has GaussianVoxelLimit volumes, only cells inside one of them.
 	ASplatCaptureVolume* V = Volume.Get();
 	const float Spacing = V->CameraSpacing;
 	const bool bFill = V->Placement == ESplatCapturePlacement::Fill;
@@ -751,6 +753,19 @@ bool FG2SCaptureJob::TickPlan()
 		Queue = V->GetStartPoints();
 		Seeds = Queue.Num();
 		Next = 0;
+		if (!FindLimits())
+		{
+			return false;
+		}
+		for (const FVector& Start : Queue)
+		{
+			if (!InsideLimits(Start))
+			{
+				Fail(FString::Printf(TEXT("start point %s is outside every GaussianVoxelLimit volume. "
+					"Move the volume so that it contains the start point, or the start point into it."), *Start.ToCompactString()));
+				return false;
+			}
+		}
 	}
 
 	// As many probes as fit in a short slice of this frame: the editor stays responsive.
@@ -798,6 +813,12 @@ bool FG2SCaptureJob::TickPlan()
 						continue;
 					}
 					Seen.Add(C);
+					if (!InsideLimits(To))
+					{
+						// Reached but past the limit: not taken, and the walk does not go on from it.
+						++OutsideLimits;
+						continue;
+					}
 					Queue.Add(To);
 				}
 			}
@@ -824,6 +845,10 @@ bool FG2SCaptureJob::TickPlan()
 	{
 		UE_LOG(LogG2S, Display, TEXT("capture: %d of %lld grid points are in reachable open space (%d too close to a surface)"),
 			Positions.Num() - Seeds, Grid.NumCells(), TooClose);
+	}
+	if (Limits.Num() > 0)
+	{
+		UE_LOG(LogG2S, Display, TEXT("capture: %d reachable grid points left out, outside GaussianVoxelLimit"), OutsideLimits);
 	}
 	const int32 MaxPositions = V->MaxPositions > 0 ? V->MaxPositions : G2SPlanner::AutoMaxPositions(V->ImageSize);
 	if (Positions.Num() > MaxPositions)
@@ -865,6 +890,64 @@ bool FG2SCaptureJob::TickPlan()
 	Counter = 0;
 	Phase = EPhase::Shoot;
 	return true;
+}
+
+bool FG2SCaptureJob::FindLimits()
+{
+	// Every volume whose label or name starts with GaussianVoxelLimit (copies are
+	// labelled GaussianVoxelLimit2, ...). Cameras go only where one of them is.
+	static const FString Prefix = TEXT("GaussianVoxelLimit");
+	Limits.Reset();
+	OutsideLimits = 0;
+	for (TActorIterator<AActor> It(World.Get()); It; ++It)
+	{
+		if (!It->GetActorLabel().StartsWith(Prefix) && !It->GetName().StartsWith(Prefix))
+		{
+			continue;
+		}
+		AVolume* Limit = Cast<AVolume>(*It);
+		if (Limit == nullptr)
+		{
+			Fail(FString::Printf(TEXT("%s is a %s, not a volume. Use a volume to limit where cameras go "
+				"(Place Actors > Volumes, for example a Trigger Volume), or rename the actor."),
+				*It->GetActorLabel(), *It->GetClass()->GetName()));
+			return false;
+		}
+		FLimit L;
+		L.Volume = Limit;
+		L.Bounds = Limit->GetBounds().GetBox();
+		// The volume's own test (EncompassesPoint) needs its collision shape; without
+		// one it reports a distance of -1 and its bounding box is used instead.
+		float Distance = 0.f;
+		Limit->EncompassesPoint(L.Bounds.GetCenter(), 0.f, &Distance);
+		L.bBoundsOnly = Distance < 0.f;
+		const FVector Size = L.Bounds.GetSize() / 100.0;
+		UE_LOG(LogG2S, Display, TEXT("capture: cameras stay inside %s (%s, %.1f x %.1f x %.1f m)"),
+			*Limit->GetActorLabel(), *Limit->GetClass()->GetName(), Size.X, Size.Y, Size.Z);
+		if (L.bBoundsOnly)
+		{
+			Note(FString::Printf(TEXT("%s has no collision shape: its bounding box limits the cameras, not its shape"), *Limit->GetActorLabel()));
+		}
+		Limits.Add(L);
+	}
+	return true;
+}
+
+bool FG2SCaptureJob::InsideLimits(const FVector& At) const
+{
+	if (Limits.Num() == 0)
+	{
+		return true;
+	}
+	for (const FLimit& L : Limits)
+	{
+		const AVolume* Limit = L.Volume.Get();
+		if (Limit != nullptr && (L.bBoundsOnly ? L.Bounds.IsInsideOrOn(At) : Limit->EncompassesPoint(At)))
+		{
+			return true;
+		}
+	}
+	return false;
 }
 
 bool FG2SCaptureJob::SaveColour(USceneCaptureComponent2D* Capture, const FString& Path)

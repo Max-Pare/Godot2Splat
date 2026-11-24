@@ -76,6 +76,8 @@ private:
 	bool TickSettle();
 	bool TickMeter();
 	bool TickPlan();
+	bool FindLimits();
+	bool InsideLimits(const FVector& At) const;
 	bool TickShoot();
 	bool TickSky();
 	bool WriteManifest();
@@ -126,6 +128,15 @@ private:
 	int32 Next = 0;
 	int32 TooClose = 0;
 	TArray<FVector> Positions;
+	// GaussianVoxelLimit volumes: cameras only inside them (none: no limit)
+	struct FLimit
+	{
+		TWeakObjectPtr<class AVolume> Volume;
+		FBox Bounds;
+		bool bBoundsOnly = false;   // no collision shape to test against: its bounding box is used
+	};
+	TArray<FLimit> Limits;
+	int32 OutsideLimits = 0;
 	// pictures
 	struct FShot { FString Name; FString Split; FQuat Rotation; FVector Location; };
 	TArray<FShot> Shots;

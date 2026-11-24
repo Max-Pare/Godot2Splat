@@ -25,6 +25,9 @@ enum class ESplatCapturePlacement : uint8
  * from any surface. Extra Start Points add more, for example in a room behind a
  * closed door.
  *
+ * A volume in the level labelled GaussianVoxelLimit (or GaussianVoxelLimit2, ...)
+ * keeps the cameras inside it, whatever the placement: the fill never goes past it.
+ *
  * Scan with the "Scan to Splat" toolbar button, or with
  * `g2s build <Unreal project> <map> --godot-project <Godot project>`.
  * The splat ends up in the Godot project, not in this one.
