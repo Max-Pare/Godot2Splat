@@ -137,6 +137,22 @@ try:
         r["gpu"] = torch.cuda.get_device_name(0)
         r["arch"] = "sm_%d%d" % (major, minor)
         r["arch_list"] = torch.cuda.get_arch_list()
+        # A kernel built for sm_XY runs on any GPU of the same major version and an equal or
+        # higher minor (sm_86 runs on an RTX 40-series, sm_89, which torch does not list);
+        # one with a suffix (sm_90a) runs only on exactly that GPU. PTX (compute_XY) is
+        # compiled by the driver for any GPU at or above it.
+        import re
+        def runs_here(entry):
+            m = re.fullmatch(r"(sm|compute)_(\d+)(\d)([a-z]?)", entry)
+            if not m:
+                return False
+            built = (int(m.group(2)), int(m.group(3)))
+            if m.group(1) == "compute":
+                return built <= (major, minor)
+            if m.group(4):
+                return built == (major, minor)
+            return built[0] == major and built[1] <= minor
+        r["arch_ok"] = any(runs_here(a) for a in r["arch_list"])
         r["vram_gb"] = round(torch.cuda.get_device_properties(0).total_memory / 2**30, 1)
 except Exception as e:
     r["torch_error"] = repr(e)
@@ -174,8 +190,8 @@ if ($py) {
         Need "torch $($py.torch) (CUDA $($py.torch_cuda)) cannot use the GPU: torch.cuda.is_available() is False" "Update the NVIDIA driver (570 or newer), then run: $syncFix"
     } else {
         Ok "torch $($py.torch), CUDA $($py.torch_cuda), $($py.gpu) ($($py.arch), $($py.vram_gb) GB)"
-        if ($py.arch_list -and ($py.arch_list -notcontains $py.arch)) {
-            Need "this torch build has no kernels for $($py.arch) (it has: $($py.arch_list -join ', '))" "$syncFix    # RTX 50-series needs the cu128 build (pytorch-cu128 index in pyproject.toml)"
+        if ($py.arch_list -and -not $py.arch_ok) {
+            Need "this torch build has no kernels that run on $($py.arch) (it has: $($py.arch_list -join ', '))" "$syncFix    # RTX 50-series needs the cu128 build (pytorch-cu128 index in pyproject.toml)"
         }
     }
     if ($py.gsplat_error) { Need "gsplat does not import: $($py.gsplat_error)" $syncFix }
