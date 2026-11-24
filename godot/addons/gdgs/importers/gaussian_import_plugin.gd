@@ -18,7 +18,7 @@ func _get_importer_name() -> String:
 	return "gaussian.splat.importer"
 
 func _get_format_version() -> int:
-	return 5
+	return 6   # 6: the splats are stored once (point_data_byte), not twice
 
 func _get_visible_name() -> String:
 	return "Gaussian Splat (.ply/.compressed.ply/.splat/.sog)"

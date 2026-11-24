@@ -191,6 +191,14 @@ were added for this. The 5090 run used them (351 positions) but collapsed, so th
   3.41 GiB of which buffers 2.24 GiB (gdgs's), 60 fps under vsync. F3 toggling checked headless.
   Godot's process time includes the vsync wait, so the CPU line shows render and physics only.
 - 5090 setup: `scripts/setup_windows.ps1`, `scripts/pack.ps1`, README "Running on another machine".
+- Smaller splat files, nothing lost. The PLY no longer has the normals (always zero, unread):
+  the corridor's 603 MiB became 574 MiB. gdgs stored each splat twice in its imported `.res`
+  (`point_data_byte` was `point_data_float.to_byte_array()`); now once. Corridor, in a scratch
+  project: `.res` 1197 MiB to 613 MiB, load 535 ms to 200 ms, same bytes, same `xyz` and box,
+  collision snapshot fine; an old `.res` loads and takes 612 MiB of RAM instead of twice that.
+  Godot's own compression (`ResourceSaver.FLAG_COMPRESS`) was tried first: 5.5% smaller and
+  loading 6.5 times slower (0.36 s to 2.3 s), so it is not used. Trained floats barely compress
+  (zlib 91%, lzma 89.5%, 81% with the bytes regrouped), so this is about all a lossless change gets.
 
 ## Needs testing
 

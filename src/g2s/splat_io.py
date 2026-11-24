@@ -18,22 +18,26 @@ def _sigmoid(x: np.ndarray) -> np.ndarray:
 
 
 def write_ply(path: Path, means, scales, quats, opacities, sh0, shN) -> None:
-    """Standard 3DGS PLY layout (INRIA), readable by most splat tools."""
+    """Standard 3DGS PLY layout (INRIA), readable by most splat tools, without the
+    normals (nx, ny, nz): INRIA writes them as zeros and no splat reader uses them."""
     n = len(means)
     f_dc = sh0.reshape(n, 3)
     f_rest = shN.transpose(0, 2, 1).reshape(n, -1)  # channel-major, as INRIA stores it
-    names = (["x", "y", "z", "nx", "ny", "nz"]
+    names = (["x", "y", "z"]
              + [f"f_dc_{i}" for i in range(3)]
              + [f"f_rest_{i}" for i in range(f_rest.shape[1])]
              + ["opacity"] + [f"scale_{i}" for i in range(3)] + [f"rot_{i}" for i in range(4)])
-    data = np.concatenate(
-        [means, np.zeros((n, 3)), f_dc, f_rest, opacities.reshape(n, 1), scales, quats],
-        axis=1).astype("<f4")
-    header = "ply\nformat binary_little_endian 1.0\n" + f"element vertex {n}\n"
+    data = np.concatenate([means, f_dc, f_rest, opacities.reshape(n, 1), scales, quats], axis=1)
+    _write_table(path, names, data)
+
+
+def _write_table(path: Path, names: list[str], data: np.ndarray) -> None:
+    """A binary PLY of float properties `names`, one row of `data` per vertex."""
+    header = "ply\nformat binary_little_endian 1.0\n" + f"element vertex {len(data)}\n"
     header += "".join(f"property float {name}\n" for name in names) + "end_header\n"
     with open(path, "wb") as f:
         f.write(header.encode("ascii"))
-        f.write(data.tobytes())
+        f.write(np.ascontiguousarray(data, dtype="<f4").tobytes())
 
 
 def read_ply(path: Path) -> tuple[list[str], np.ndarray]:
@@ -57,16 +61,15 @@ def read_ply(path: Path) -> tuple[list[str], np.ndarray]:
 
 def transform_ply(src: Path, dst: Path, scale: float, shift: np.ndarray) -> np.ndarray:
     """Writes `src` to `dst` with positions x' = scale * (x - shift) and sizes scaled.
-    No rotation, so orientations and view-dependent colour stay valid. Returns positions."""
+    No rotation, so orientations and view-dependent colour stay valid. Normals, which
+    splats trained before they were left out still have, are dropped. Returns positions."""
     names, data = read_ply(src)
+    keep = [i for i, name in enumerate(names) if name not in ("nx", "ny", "nz")]
+    names, data = [names[i] for i in keep], data[:, keep]
     xyz = [names.index(k) for k in ("x", "y", "z")]
     data[:, xyz] = scale * (data[:, xyz] - np.asarray(shift, dtype=np.float32))
     data[:, [names.index(f"scale_{i}") for i in range(3)]] += np.log(scale)  # stored as logarithms
-    header = "ply\nformat binary_little_endian 1.0\n" + f"element vertex {len(data)}\n"
-    header += "".join(f"property float {name}\n" for name in names) + "end_header\n"
-    with open(dst, "wb") as f:
-        f.write(header.encode("ascii"))
-        f.write(data.astype("<f4").tobytes())
+    _write_table(dst, names, data)
     return data[:, xyz]
 
 

@@ -221,7 +221,7 @@ Effects that differ from view to view (SSR, SSAO, SSIL, glow, depth of field, au
 
 **Clean.** Removes near-transparent, oversized, needle-shaped and isolated Gaussians, any that float in space the depth maps show as empty, and any that no view shows (behind the surface in every view: strays above ceilings, below floors and inside walls, which would otherwise stretch the splat's bounding box far past the level). If it keeps under 5% of the Gaussians, training failed: the build stops there and the Godot project keeps its previous splat.
 
-**Export.** Writes `<scene>.ply` (centred on its mean position), `<scene>_sky.png` when the scan saw the sky, and builds `<scene>_splat.tscn`:
+**Export.** Writes `<scene>.ply` (centred on its mean position; the INRIA layout without the normals, which are always zero and unused), `<scene>_sky.png` when the scan saw the sky, and builds `<scene>_splat.tscn`:
 
 ```
 <Scene>Splat (Node3D)
@@ -293,6 +293,6 @@ Copied, so this repository stands alone:
 | `src/g2s/evaluate.py` | `tools/eval_render.py` | scores held-out views |
 | `scripts/`, `tests/test_gsplat_gpu.py` and others | same | names only |
 | `godot/addons/godot2splat/objects/splat_object.gd` | `godot_template/scripts/splat_object.gd` | collision follows whole static bodies instead of cut mesh triangles; no backdrop mesh |
-| `godot/addons/gdgs` | `godot_template/addons/gdgs` | GDGS 3.3.0 (MIT, ReconWorldLab) with one fix: close to large splats the tile sort buffer overflowed and the picture showed flat grey squares; entries past its capacity are now dropped, and the buffer holds 16 entries per splat instead of 10 |
+| `godot/addons/gdgs` | `godot_template/addons/gdgs` | GDGS 3.3.0 (MIT, ReconWorldLab) with two fixes. Close to large splats the tile sort buffer overflowed and the picture showed flat grey squares; entries past its capacity are now dropped, and the buffer holds 16 entries per splat instead of 10. The imported resource stored every splat twice (`point_data_float` and the same bytes in `point_data_byte`); it now stores the bytes once, and `point_data_float` is made from them when read. That halves the imported file and the memory it takes; files imported before still load, and the importer's format version went up so projects import their splats again |
 
 Not needed here: video frames, COLMAP, alignment, pose refinement, TSDF collision.

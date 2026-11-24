@@ -141,12 +141,31 @@ def test_ply_layout_and_recentring(tmp_path):
              sh0=rng.normal(size=(n, 1, 3)), shN=rng.normal(size=(n, k, 3)))
     splat_io.write_ply(tmp_path / "s.ply", **g)
     names, data = splat_io.read_ply(tmp_path / "s.ply")
-    assert len(names) == 3 + 3 + 3 + 45 + 1 + 3 + 4 and data.shape == (10, 62)
+    assert len(names) == 3 + 3 + 45 + 1 + 3 + 4 and data.shape == (10, 59)
+    assert "nx" not in names                        # zeros that nothing reads
     assert np.allclose(data[:, :3], g["means"], atol=1e-6)
     # f_rest is channel-major: first value is coefficient 0 of red.
-    assert np.allclose(data[:, 9], g["shN"][:, 0, 0], atol=1e-6)
+    assert np.allclose(data[:, 6], g["shN"][:, 0, 0], atol=1e-6)
     centre = g["means"].mean(axis=0)
     xyz = splat_io.transform_ply(tmp_path / "s.ply", tmp_path / "c.ply", 1.0, centre)
     assert np.allclose(xyz.mean(axis=0), 0, atol=1e-6)
-    _, moved = splat_io.read_ply(tmp_path / "c.ply")
+    moved_names, moved = splat_io.read_ply(tmp_path / "c.ply")
+    assert moved_names == names
     assert np.allclose(moved[:, 3:], data[:, 3:])   # only the positions change
+
+
+def test_export_drops_the_normals_of_older_splats(tmp_path):
+    """Splats trained before the normals were left out still have them; the copy
+    exported to Godot does not, and is otherwise the same."""
+    rng = np.random.default_rng(1)
+    n = 6
+    g = dict(means=rng.normal(size=(n, 3)), scales=rng.normal(size=(n, 3)) - 3,
+             quats=rng.normal(size=(n, 4)), opacities=rng.normal(size=n),
+             sh0=rng.normal(size=(n, 1, 3)), shN=rng.normal(size=(n, 15, 3)))
+    splat_io.write_ply(tmp_path / "new.ply", **g)
+    names, data = splat_io.read_ply(tmp_path / "new.ply")
+    old = np.concatenate([data[:, :3], np.zeros((n, 3)), data[:, 3:]], axis=1)
+    splat_io._write_table(tmp_path / "old.ply", names[:3] + ["nx", "ny", "nz"] + names[3:], old)
+    splat_io.transform_ply(tmp_path / "old.ply", tmp_path / "out.ply", 1.0, np.zeros(3))
+    out_names, out = splat_io.read_ply(tmp_path / "out.ply")
+    assert out_names == names and np.allclose(out, data)
