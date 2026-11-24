@@ -19,7 +19,7 @@ layout(push_constant, std430) uniform Params {
     float depth_test_min_alpha;
     float debug_view;
     float use_scene_depth;
-    float _pad0;
+    float solid_alpha;   // g2s: splat pixels at least this opaque hide the scene behind; 1 turns it off
     mat4 inv_projection;
 } p;
 
@@ -115,7 +115,15 @@ void main() {
     }
 
     vec3 gsplat_straight = unpremultiply_color(gsplat_color.rgb, gsplat_alpha);
-    vec3 gsplat_linear = srgb_to_linear(gsplat_straight) * gsplat_alpha;
-    vec3 composited_color = gsplat_linear + scene_color.rgb * (1.0 - gsplat_alpha);
+    // Nearly opaque splat pixels hide the scene behind them completely (g2s fix). A
+    // splat keeps a few percent of transparency on its surfaces, more between its
+    // cameras; behind a dark wall a bright sky then showed through as patches. Below
+    // half of solid_alpha nothing changes: windows, the edges of objects.
+    float shown_alpha = gsplat_alpha;
+    if (p.solid_alpha < 1.0) {
+        shown_alpha = mix(gsplat_alpha, 1.0, smoothstep(0.5 * p.solid_alpha, p.solid_alpha, gsplat_alpha));
+    }
+    vec3 gsplat_linear = srgb_to_linear(gsplat_straight) * shown_alpha;
+    vec3 composited_color = gsplat_linear + scene_color.rgb * (1.0 - shown_alpha);
     imageStore(scene_tex, pixel, vec4(composited_color, scene_color.a));
 }

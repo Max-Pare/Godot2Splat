@@ -167,6 +167,32 @@ Checked on the test room at SM6 with distance fields, off-screen, same 36 positi
 - New plugin: warm bounce light on those walls. Mean picture difference 37 of 255.
 - 16 against 64 warmup frames, same exposure: 40.7 dB, mean difference 1.3, worst picture 2.4 after the first-view fix.
 
+### See-through patches on walls and floors in Godot (fixed in gdgs)
+
+Seen on the living room splat (4.44M Gaussians, 4090 scan, viewed on the 5060 Laptop):
+semi-transparent patches on walls and floors with the sky behind them, shifting as the
+player walks. Measured off-screen at 1920x1080 from 10 poses inside the room. Each pose was
+rendered by gdgs over magenta and over green, so the difference gives each pixel's
+transparency, and compared with gsplat's alpha at the same camera.
+
+- gdgs and gsplat agree: 2 to 5% of pixels let more than 3% through, about 1% more than
+  10%. The splat itself has it, and the renderer is not adding any.
+- In a dark room it shows: a wall at 0.02 with 3% of a 0.3 sky behind gets 45% brighter.
+- Not the cause: gdgs's splat extent (`pow(opacity, 0.2) * 2.5` standard deviations against
+  gsplat's 1/255 rule). Porting gsplat's rule changed nothing measurable; reverted.
+- Not the cause: tile sort overflow. Corner views need 10.9M entries of the 71M buffer.
+- A SplatObject's pulsing glow made its object look see-through in this test; the test
+  scene leaves them out.
+
+Fix (`gaussian_composite.glsl`, `solid_alpha` on GaussianCompositorEffect, default 0.9):
+splat pixels at least 90% opaque hide the scene behind completely, blending in from 45%.
+Afterwards, from the same poses, pixels letting more than 3% through went from 2-5% to under
+0.6%. That rest is the windows and real openings: the share letting more than 50% through
+is unchanged. By eye: the patches are gone and the windows still show the sky.
+
+Not done: training could leave less transparency to begin with (a stronger opacity term on
+surfaces). The compositor fix also covers splats already trained.
+
 ### Strays outside the level (fixed)
 
 Seen in Godot on the 5090 corridor splat: the splat node's bounding box many times larger than

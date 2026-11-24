@@ -26,6 +26,10 @@ enum DebugView {
 @export_range(0.0, 1.0, 0.001) var depth_bias := 0.05
 @export_range(0.0, 1.0, 0.001) var depth_test_min_alpha := 0.05
 @export_range(0.0, 1.0, 0.001) var depth_capture_alpha = 0.5
+## Splat pixels at least this opaque hide what is behind them completely, and from half
+## of it they blend towards that. Surfaces keep a few percent of transparency, which a
+## bright sky behind a dark wall shows as patches (g2s). 1 turns it off.
+@export_range(0.5, 1.0, 0.01) var solid_alpha := 0.9
 @export_enum("Compositor", "Direct Texture") var display_mode: int:
 	set(value):
 		_display_mode = clampi(value, DisplayMode.COMPOSITOR, DisplayMode.DIRECT_TEXTURE)
@@ -164,7 +168,7 @@ func _render_callback(_effect_callback_type: int, render_data: RenderData) -> vo
 			depth_test_min_alpha,
 			float(debug_view),
 			1.0 if use_scene_depth else 0.0,
-			0.0
+			solid_alpha
 		] + _projection_to_column_major_floats(camera_data["projection"].inverse()))
 
 		var scene_uniform := RDUniform.new()
